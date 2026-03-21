@@ -13,6 +13,7 @@ import CVESearch from "./pages/CVESearch";
 import SubdomainTakeover from "./pages/SubdomainTakeover";
 import ScheduledScans from "./pages/ScheduledScans";
 import Settings from "./pages/Settings";
+import EmailSecurity from "./pages/EmailSecurity";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -34,6 +35,16 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route
+          path="/emailsecurity"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <EmailSecurity />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/settings"
           element={

@@ -58,6 +58,7 @@ app.use("/api/cve", auth, require("./routes/cve"));
 app.use("/api/takeover", auth, scanLimiter, require("./routes/takeover"));
 app.use("/api/schedules", auth, require("./routes/schedules"));
 app.use("/api/email", auth, require("./routes/email"));
+app.use("/api/emailsecurity", auth, require("./routes/emailsecurity"));
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "GhostRecon server running" });
