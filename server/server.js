@@ -18,6 +18,7 @@ app.use("/api/osint", auth, require("./routes/osint"));
 app.use("/api/dashboard", auth, require("./routes/dashboard"));
 app.use("/api/ssl", auth, require("./routes/ssl"));
 app.use("/api/cve", auth, require("./routes/cve"));
+app.use("/api/takeover", auth, require("./routes/takeover"));
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "GhostRecon server running" });

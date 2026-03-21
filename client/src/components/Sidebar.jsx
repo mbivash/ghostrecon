@@ -13,6 +13,7 @@ const nav = [
       { label: "OSINT engine", path: "/osint" },
       { label: "SSL/TLS checker", path: "/ssl" },
       { label: "CVE database", path: "/cve" },
+      { label: "Subdomain takeover", path: "/takeover" },
     ],
   },
   {
