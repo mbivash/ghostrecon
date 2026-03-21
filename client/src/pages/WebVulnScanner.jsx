@@ -15,6 +15,7 @@ export default function WebVulnScanner() {
   const [results, setResults] = useState(null);
   const [error, setError] = useState("");
   const [loadingMsg, setLoadingMsg] = useState("");
+  const [activeTab, setActiveTab] = useState("all");
 
   const handleScan = async () => {
     if (!consent) return setError("You must check the authorization box.");
@@ -27,17 +28,20 @@ export default function WebVulnScanner() {
     const messages = [
       "Fetching target page...",
       "Checking security headers...",
-      "Testing forms for XSS...",
+      "Checking cookie security...",
+      "Scanning for sensitive files...",
+      "Crawling pages and forms...",
+      "Testing for XSS vulnerabilities...",
       "Testing for SQL injection...",
       "Checking for open redirects...",
-      "Analyzing results...",
+      "Analyzing all findings...",
     ];
     let i = 0;
     setLoadingMsg(messages[0]);
-    const msgInterval = setInterval(() => {
+    const interval = setInterval(() => {
       i++;
       if (i < messages.length) setLoadingMsg(messages[i]);
-    }, 3000);
+    }, 8000);
 
     try {
       const res = await api.post("/api/webvuln/scan", {
@@ -45,46 +49,36 @@ export default function WebVulnScanner() {
         consent,
       });
       setResults(res.data.data);
+      setActiveTab("all");
     } catch (err) {
       setError(
         err.response?.data?.error || "Scan failed. Is the server running?",
       );
     } finally {
-      clearInterval(msgInterval);
+      clearInterval(interval);
       setLoading(false);
     }
   };
 
-  const riskScore = (summary) => {
-    if (!summary) return 0;
-    return Math.min(
-      100,
-      summary.critical * 40 +
-        summary.high * 20 +
-        summary.medium * 10 +
-        summary.low * 5,
-    );
-  };
-
-  const riskLabel = (score) => {
-    if (score >= 60) return { label: "Critical Risk", color: "#ff4444" };
-    if (score >= 40) return { label: "High Risk", color: "#E24B4A" };
-    if (score >= 20) return { label: "Medium Risk", color: "#BA7517" };
-    if (score > 0) return { label: "Low Risk", color: "#639922" };
-    return { label: "Clean", color: "#1D9E75" };
-  };
+  const filtered =
+    results?.findings?.filter((f) => {
+      if (activeTab === "all") return true;
+      return f.severity.toLowerCase() === activeTab;
+    }) || [];
 
   return (
-    <div style={{ padding: "32px", maxWidth: "900px" }}>
+    <div style={{ padding: "32px", maxWidth: "1000px" }}>
       <div style={{ marginBottom: "28px" }}>
         <h1 style={{ fontSize: "22px", fontWeight: "500", color: "#e8e6f0" }}>
           Web Vulnerability Scanner
         </h1>
         <p style={{ fontSize: "13px", color: "#555", marginTop: "4px" }}>
-          Scan websites for XSS, SQL injection, missing headers and more.
+          Deep automated scan — XSS, SQLi, headers, cookies, sensitive files,
+          open redirects. OWASP mapped.
         </p>
       </div>
 
+      {/* Form */}
       <div
         style={{
           background: "#131315",
@@ -113,9 +107,9 @@ export default function WebVulnScanner() {
               onChange={(e) => setTarget(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleScan()}
             />
-            <div style={{ fontSize: "11px", color: "#444", marginTop: "6px" }}>
-              Free test target: http://testphp.vulnweb.com (intentionally
-              vulnerable site)
+            <div style={{ fontSize: "11px", color: "#444", marginTop: "4px" }}>
+              Free test target: http://testphp.vulnweb.com — intentionally
+              vulnerable site
             </div>
           </div>
 
@@ -167,11 +161,12 @@ export default function WebVulnScanner() {
             disabled={loading}
             style={{ alignSelf: "flex-start", padding: "10px 28px" }}
           >
-            {loading ? "Scanning..." : "Start Scan"}
+            {loading ? "Scanning..." : "Start Deep Scan"}
           </button>
         </div>
       </div>
 
+      {/* Loading */}
       {loading && (
         <div
           style={{
@@ -200,26 +195,32 @@ export default function WebVulnScanner() {
             {loadingMsg}
           </div>
           <div style={{ color: "#444", fontSize: "12px" }}>
-            This may take 20–60 seconds
+            Deep scan — may take 1–3 minutes
           </div>
         </div>
       )}
 
+      {/* Results */}
       {results && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Summary cards */}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(5, 1fr)",
+              gridTemplateColumns: "repeat(6, 1fr)",
               gap: "10px",
             }}
           >
             {[
               {
                 label: "Risk score",
-                val: riskScore(results.summary),
-                suffix: "/100",
-                color: riskLabel(riskScore(results.summary)).color,
+                val: `${results.riskScore}/100`,
+                color:
+                  results.riskScore >= 60
+                    ? "#E24B4A"
+                    : results.riskScore >= 30
+                      ? "#BA7517"
+                      : "#1D9E75",
               },
               {
                 label: "Critical",
@@ -233,6 +234,11 @@ export default function WebVulnScanner() {
                 color: "#BA7517",
               },
               { label: "Low", val: results.summary.low, color: "#639922" },
+              {
+                label: "Pages scanned",
+                val: results.pagesScanned,
+                color: "#7F77DD",
+              },
             ].map((s) => (
               <div
                 key={s.label}
@@ -240,21 +246,20 @@ export default function WebVulnScanner() {
                   background: "#131315",
                   border: "0.5px solid #1e1e22",
                   borderRadius: "10px",
-                  padding: "14px",
+                  padding: "12px",
                 }}
               >
                 <div
                   style={{
-                    fontSize: "20px",
+                    fontSize: "18px",
                     fontWeight: "500",
                     color: s.color,
                   }}
                 >
                   {s.val}
-                  {s.suffix || ""}
                 </div>
                 <div
-                  style={{ fontSize: "11px", color: "#555", marginTop: "3px" }}
+                  style={{ fontSize: "11px", color: "#555", marginTop: "2px" }}
                 >
                   {s.label}
                 </div>
@@ -262,51 +267,47 @@ export default function WebVulnScanner() {
             ))}
           </div>
 
+          {/* Filter tabs */}
           <div
             style={{
+              display: "flex",
+              gap: "4px",
               background: "#131315",
+              padding: "4px",
+              borderRadius: "10px",
               border: "0.5px solid #1e1e22",
-              borderRadius: "12px",
-              padding: "16px 20px",
+              width: "fit-content",
             }}
           >
-            <div
-              style={{
-                fontSize: "11px",
-                color: "#444",
-                textTransform: "uppercase",
-                letterSpacing: "0.6px",
-                marginBottom: "10px",
-              }}
-            >
-              Target info
-            </div>
-            <div style={{ display: "flex", gap: "32px", flexWrap: "wrap" }}>
-              {[
-                { label: "URL", val: results.target },
-                { label: "Status", val: results.info.statusCode },
-                { label: "Server", val: results.info.server },
-                { label: "Forms found", val: results.info.formsFound },
-              ].map((item) => (
-                <div key={item.label}>
-                  <div style={{ fontSize: "11px", color: "#555" }}>
-                    {item.label}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "13px",
-                      color: "#ccc",
-                      marginTop: "2px",
-                      fontFamily: "monospace",
-                    }}
-                  >
-                    {item.val}
-                  </div>
-                </div>
-              ))}
-            </div>
+            {[
+              { label: `All (${results.summary.total})`, val: "all" },
+              {
+                label: `Critical (${results.summary.critical})`,
+                val: "critical",
+              },
+              { label: `High (${results.summary.high})`, val: "high" },
+              { label: `Medium (${results.summary.medium})`, val: "medium" },
+              { label: `Low (${results.summary.low})`, val: "low" },
+            ].map((tab) => (
+              <button
+                key={tab.val}
+                onClick={() => setActiveTab(tab.val)}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  background: activeTab === tab.val ? "#7F77DD" : "transparent",
+                  color: activeTab === tab.val ? "white" : "#666",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
+          {/* Findings */}
           <div
             style={{
               background: "#131315",
@@ -325,10 +326,10 @@ export default function WebVulnScanner() {
                 letterSpacing: "0.6px",
               }}
             >
-              {results.vulnerabilities.length} vulnerabilities found
+              {filtered.length} findings
             </div>
 
-            {results.vulnerabilities.length === 0 ? (
+            {filtered.length === 0 ? (
               <div
                 style={{
                   padding: "32px",
@@ -337,29 +338,30 @@ export default function WebVulnScanner() {
                   fontSize: "14px",
                 }}
               >
-                No vulnerabilities detected. Site appears secure.
+                No vulnerabilities found in this category.
               </div>
             ) : (
-              results.vulnerabilities.map((v, i) => {
-                const style =
-                  SEVERITY_STYLES[v.severity] || SEVERITY_STYLES.Low;
+              filtered.map((v, i) => {
+                const s = SEVERITY_STYLES[v.severity] || SEVERITY_STYLES.Low;
                 return (
                   <div
                     key={i}
                     style={{
-                      padding: "16px 20px",
+                      padding: "18px 20px",
                       borderBottom:
-                        i < results.vulnerabilities.length - 1
+                        i < filtered.length - 1
                           ? "0.5px solid #0f0f11"
                           : "none",
                     }}
                   >
+                    {/* Header */}
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
                         gap: "10px",
-                        marginBottom: "6px",
+                        marginBottom: "8px",
+                        flexWrap: "wrap",
                       }}
                     >
                       <span
@@ -367,9 +369,9 @@ export default function WebVulnScanner() {
                           fontSize: "11px",
                           padding: "2px 8px",
                           borderRadius: "10px",
-                          background: style.bg,
-                          color: style.color,
-                          border: `0.5px solid ${style.border}`,
+                          background: s.bg,
+                          color: s.color,
+                          border: `0.5px solid ${s.border}`,
                         }}
                       >
                         {v.severity}
@@ -383,29 +385,94 @@ export default function WebVulnScanner() {
                       >
                         {v.type}
                       </span>
+                      {v.owasp && (
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            padding: "2px 8px",
+                            borderRadius: "10px",
+                            background: "#0d0d2e",
+                            color: "#7F77DD",
+                            border: "0.5px solid #3C3489",
+                          }}
+                        >
+                          {v.owasp}
+                        </span>
+                      )}
                     </div>
+
+                    {/* Detail */}
                     <div
                       style={{
                         fontSize: "13px",
-                        color: "#666",
-                        marginBottom: "6px",
+                        color: "#777",
+                        marginBottom: "8px",
+                        lineHeight: "1.6",
                       }}
                     >
                       {v.detail}
                     </div>
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: "#555",
-                        fontFamily: "monospace",
-                        background: "#0d0d0f",
-                        padding: "6px 10px",
-                        borderRadius: "6px",
-                        display: "inline-block",
-                      }}
-                    >
-                      {v.evidence}
-                    </div>
+
+                    {/* Evidence */}
+                    {v.evidence && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#555",
+                          fontFamily: "monospace",
+                          background: "#0d0d0f",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        {v.evidence}
+                      </div>
+                    )}
+
+                    {/* Endpoint */}
+                    {v.endpoint && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#555",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        <span style={{ color: "#444" }}>Endpoint: </span>
+                        <span
+                          style={{ fontFamily: "monospace", color: "#a89ff5" }}
+                        >
+                          {v.method} {v.endpoint}
+                        </span>
+                        {v.parameter && (
+                          <span style={{ color: "#444" }}>
+                            {" "}
+                            — Parameter:{" "}
+                            <span style={{ color: "#BA7517" }}>
+                              {v.parameter}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Remediation */}
+                    {v.remediation && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#1D9E75",
+                          background: "#0a1a14",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          borderLeft: "2px solid #1D9E75",
+                          marginTop: "8px",
+                        }}
+                      >
+                        Fix: {v.remediation}
+                      </div>
+                    )}
                   </div>
                 );
               })
