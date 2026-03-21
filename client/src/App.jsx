@@ -14,6 +14,7 @@ import SubdomainTakeover from "./pages/SubdomainTakeover";
 import ScheduledScans from "./pages/ScheduledScans";
 import Settings from "./pages/Settings";
 import EmailSecurity from "./pages/EmailSecurity";
+import AuthenticatedScanner from "./pages/AuthenticatedScanner";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -35,6 +36,16 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route
+          path="/authscan"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <AuthenticatedScanner />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/emailsecurity"
           element={

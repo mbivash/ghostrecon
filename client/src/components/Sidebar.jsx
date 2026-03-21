@@ -15,6 +15,7 @@ const nav = [
       { label: "CVE database", path: "/cve" },
       { label: "Subdomain takeover", path: "/takeover" },
       { label: "Email security", path: "/emailsecurity" },
+      { label: "Authenticated scanner", path: "/authscan" },
     ],
   },
   {

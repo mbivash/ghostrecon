@@ -129,29 +129,24 @@ async function crawlPage(targetUrl, baseUrl, visited = new Set()) {
   if (visited.has(targetUrl) || visited.size > 20)
     return { links: [], forms: [], html: "", headers: {} };
   visited.add(targetUrl);
-
   try {
     const response = await axiosInstance.get(targetUrl);
     const $ = cheerio.load(response.data);
     const links = [];
     const forms = [];
-
     $("a[href]").each((i, el) => {
       const href = $(el).attr("href");
       if (!href) return;
       try {
         const absolute = new URL(href, baseUrl).href;
-        if (absolute.startsWith(baseUrl) && !visited.has(absolute)) {
+        if (absolute.startsWith(baseUrl) && !visited.has(absolute))
           links.push(absolute);
-        }
       } catch (e) {}
     });
-
     $("form").each((i, form) => {
       const action = $(form).attr("action") || targetUrl;
       const method = ($(form).attr("method") || "get").toLowerCase();
       const inputs = [];
-
       $(form)
         .find("input, textarea, select")
         .each((j, input) => {
@@ -167,7 +162,6 @@ async function crawlPage(targetUrl, baseUrl, visited = new Set()) {
             inputs.push({ name, type, value });
           }
         });
-
       if (inputs.length > 0) {
         try {
           forms.push({
@@ -179,7 +173,6 @@ async function crawlPage(targetUrl, baseUrl, visited = new Set()) {
         } catch (e) {}
       }
     });
-
     const parsedUrl = new URL(targetUrl);
     if (parsedUrl.search) {
       const params = [];
@@ -196,7 +189,6 @@ async function crawlPage(targetUrl, baseUrl, visited = new Set()) {
         });
       }
     }
-
     return {
       links,
       forms,
@@ -410,7 +402,7 @@ async function detectWAF(targetUrl, headers) {
       type: "WAF Detected",
       severity: "Info",
       owasp: "A05:2021 - Security Misconfiguration",
-      detail: `WAF detected: ${detectedWAFs.join(", ")}. Good protection layer but should not be sole defense.`,
+      detail: `WAF detected: ${detectedWAFs.join(", ")}. Good protection but should not be sole defense.`,
       evidence: `WAF signatures: ${detectedWAFs.join(", ")}`,
       remediation: "Keep WAF rules updated.",
     });
@@ -502,8 +494,8 @@ function checkDOMXSS(html) {
       type: "DOM-Based XSS (Potential)",
       severity: "High",
       owasp: "A03:2021 - Injection",
-      detail: `Dangerous DOM sink "${sinkFound.name}" and user-controllable source detected. DOM XSS possible if data flows between them.`,
-      evidence: `Sink: ${sinkFound.name} | Source: ${sourceFound.toString().replace(/\//g, "").replace(/gi/g, "")}`,
+      detail: `Dangerous DOM sink "${sinkFound.name}" and user-controllable source detected. DOM XSS possible.`,
+      evidence: `Sink: ${sinkFound.name} | Source detected`,
       remediation:
         "Use textContent instead of innerHTML. Sanitize with DOMPurify.",
     });
@@ -715,7 +707,6 @@ async function checkBrokenAuth(forms) {
         ),
       );
       if (!userField || !passField) continue;
-
       const weakCreds = [
         { user: "admin", pass: "admin" },
         { user: "admin", pass: "password" },
@@ -753,7 +744,6 @@ async function checkBrokenAuth(forms) {
           break;
         }
       }
-
       let noRateLimit = true;
       for (let i = 0; i < 6; i++) {
         const formData = {};
@@ -824,7 +814,7 @@ async function checkJWT(headers) {
         owasp: "A02:2021 - Cryptographic Failures",
         detail:
           "HS256 is symmetric. If secret is weak, tokens can be brute-forced.",
-        evidence: `alg: HS256`,
+        evidence: "alg: HS256",
         remediation: "Upgrade to RS256. Use 256+ bit random secret.",
       });
     }
@@ -1097,7 +1087,7 @@ async function testBlindSQLi(form) {
           method: form.method.toUpperCase(),
           payload,
           detail: `Time-based blind SQLi on ${db}. Server delayed ${Math.round(elapsed / 1000)}s. Attacker extracts full database silently.`,
-          evidence: `Payload caused ${Math.round(elapsed / 1000)}s delay (expected ${delay / 1000}s) — ${db}`,
+          evidence: `Payload caused ${Math.round(elapsed / 1000)}s delay — ${db}`,
           remediation:
             "Use parameterized queries immediately. Critical vulnerability.",
         });
@@ -1126,6 +1116,366 @@ async function testBlindSQLi(form) {
     }
   }
   return findings;
+}
+
+// ── IDOR Detection ────────────────────────────────────
+async function testIDOR(urls, authedInstance, baseUrl) {
+  const findings = [];
+  const idPatterns = [
+    /[?&](id|user_id|account_id|order_id|invoice_id|profile_id|doc_id|file_id)=(\d+)/gi,
+    /\/(user|account|order|invoice|profile|document|file)\/(\d+)/gi,
+  ];
+  for (const url of urls) {
+    for (const pattern of idPatterns) {
+      const matches = [...url.matchAll(pattern)];
+      for (const match of matches) {
+        const paramValue = match[2];
+        const numericValue = parseInt(paramValue);
+        if (isNaN(numericValue)) continue;
+        const testIds = [numericValue - 1, numericValue + 1, 1, 2];
+        for (const testId of testIds) {
+          if (testId <= 0) continue;
+          try {
+            const testUrl = url.replace(
+              match[0],
+              match[0].replace(paramValue, testId.toString()),
+            );
+            const response = await authedInstance.get(testUrl);
+            if (
+              response.status === 200 &&
+              typeof response.data === "string" &&
+              response.data.length > 100 &&
+              !response.data.toLowerCase().includes("not found") &&
+              !response.data.toLowerCase().includes("unauthorized") &&
+              !response.data.toLowerCase().includes("forbidden")
+            ) {
+              findings.push({
+                type: "Insecure Direct Object Reference (IDOR)",
+                severity: "High",
+                owasp: "A01:2021 - Broken Access Control",
+                endpoint: testUrl,
+                method: "GET",
+                detail: `IDOR detected. Changing ID from ${paramValue} to ${testId} returns data. Attacker can access other users data.`,
+                evidence: `GET ${testUrl} returned HTTP 200 with content`,
+                remediation:
+                  "Implement object-level authorization. Check user owns resource before returning it.",
+              });
+              return findings;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+  }
+  return findings;
+}
+
+// ── Authenticated Scanner ─────────────────────────────
+async function authenticatedScan(targetUrl, credentials) {
+  const results = {
+    loginSuccessful: false,
+    pagesScanned: 0,
+    findings: [],
+    authenticatedUrls: [],
+  };
+
+  let loginPageUrl = credentials.loginUrl || targetUrl;
+  if (!loginPageUrl.startsWith("http")) loginPageUrl = "http://" + loginPageUrl;
+
+  let loginPage;
+  try {
+    loginPage = await axiosInstance.get(loginPageUrl);
+  } catch (e) {
+    throw new Error("Could not reach login page: " + e.message);
+  }
+
+  const $ = cheerio.load(loginPage.data);
+  let loginForm = null;
+
+  $("form").each((i, form) => {
+    const inputs = [];
+    $(form)
+      .find("input")
+      .each((j, input) => {
+        inputs.push({
+          name: $(input).attr("name"),
+          type: $(input).attr("type") || "text",
+          value: $(input).attr("value") || "",
+        });
+      });
+    const hasPassword = inputs.some(
+      (i) =>
+        i.type === "password" ||
+        (i.name && i.name.toLowerCase().includes("pass")),
+    );
+    if (hasPassword && !loginForm) {
+      loginForm = {
+        action: new URL($(form).attr("action") || loginPageUrl, loginPageUrl)
+          .href,
+        method: ($(form).attr("method") || "post").toLowerCase(),
+        inputs,
+      };
+    }
+  });
+
+  if (!loginForm) {
+    const loginPaths = [
+      "/login",
+      "/signin",
+      "/user/login",
+      "/account/login",
+      "/wp-login.php",
+    ];
+    for (const path of loginPaths) {
+      try {
+        const testUrl = new URL(path, new URL(loginPageUrl).origin).href;
+        const res = await axiosInstance.get(testUrl);
+        if (res.status === 200) {
+          const $login = cheerio.load(res.data);
+          $login("form").each((i, form) => {
+            const inputs = [];
+            $login(form)
+              .find("input")
+              .each((j, input) => {
+                inputs.push({
+                  name: $login(input).attr("name"),
+                  type: $login(input).attr("type") || "text",
+                  value: $login(input).attr("value") || "",
+                });
+              });
+            const hasPass = inputs.some(
+              (i) =>
+                i.type === "password" ||
+                (i.name && i.name.toLowerCase().includes("pass")),
+            );
+            if (hasPass && !loginForm) {
+              loginForm = {
+                action: new URL($login(form).attr("action") || testUrl, testUrl)
+                  .href,
+                method: ($login(form).attr("method") || "post").toLowerCase(),
+                inputs,
+              };
+              loginPageUrl = testUrl;
+            }
+          });
+          if (loginForm) break;
+        }
+      } catch (e) {}
+    }
+  }
+
+  if (!loginForm) {
+    results.findings.push({
+      type: "Login Form Not Found",
+      severity: "Info",
+      detail: "Could not find a login form. Try providing the exact login URL.",
+      evidence: `Searched ${loginPageUrl}`,
+      remediation: "Provide the exact URL of the login page.",
+    });
+    return results;
+  }
+
+  const formData = {};
+  loginForm.inputs.forEach((input) => {
+    if (!input.name) return;
+    const name = input.name.toLowerCase();
+    if (
+      input.type === "password" ||
+      name.includes("pass") ||
+      name.includes("pwd")
+    ) {
+      formData[input.name] = credentials.password;
+    } else if (
+      name.includes("user") ||
+      name.includes("email") ||
+      name.includes("login")
+    ) {
+      formData[input.name] = credentials.username;
+    } else if (input.value) {
+      formData[input.name] = input.value;
+    }
+  });
+
+  let loginResponse;
+  try {
+    loginResponse = await axiosInstance.post(loginForm.action, formData, {
+      maxRedirects: 5,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+  } catch (e) {
+    throw new Error("Login request failed: " + e.message);
+  }
+
+  const loginBody =
+    typeof loginResponse.data === "string"
+      ? loginResponse.data.toLowerCase()
+      : "";
+  const loginCookies = loginResponse.headers["set-cookie"] || [];
+  const loginFailed =
+    loginBody.includes("invalid") ||
+    loginBody.includes("incorrect") ||
+    loginBody.includes("wrong password") ||
+    loginBody.includes("login failed");
+  const loginSucceeded =
+    loginResponse.status === 302 ||
+    loginBody.includes("dashboard") ||
+    loginBody.includes("welcome") ||
+    loginBody.includes("logout") ||
+    loginCookies.length > 0;
+
+  if (loginFailed && !loginSucceeded) {
+    results.findings.push({
+      type: "Authentication Failed",
+      severity: "Info",
+      detail: "Login failed with provided credentials.",
+      evidence: `POST ${loginForm.action} returned ${loginResponse.status}`,
+      remediation: "Verify username and password.",
+    });
+    return results;
+  }
+
+  results.loginSuccessful = true;
+  console.log("Login successful!");
+
+  const cookieHeader = loginCookies.join("; ");
+  const authedInstance = axios.create({
+    timeout: 15000,
+    validateStatus: () => true,
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; GhostRecon Security Scanner)",
+      Cookie: cookieHeader,
+    },
+    maxRedirects: 3,
+  });
+
+  const baseUrl = new URL(targetUrl).origin;
+  const visited = new Set();
+  const queue = [targetUrl];
+  const allForms = [];
+
+  while (queue.length > 0 && visited.size < 15) {
+    const pageUrl = queue.shift();
+    if (visited.has(pageUrl)) continue;
+    visited.add(pageUrl);
+    try {
+      const response = await authedInstance.get(pageUrl);
+      const $page = cheerio.load(response.data);
+      results.pagesScanned++;
+      results.authenticatedUrls.push(pageUrl);
+
+      $page("form").each((i, form) => {
+        const action = $page(form).attr("action") || pageUrl;
+        const method = ($page(form).attr("method") || "get").toLowerCase();
+        const inputs = [];
+        $page(form)
+          .find("input, textarea, select")
+          .each((j, input) => {
+            const name = $page(input).attr("name");
+            const type = $page(input).attr("type") || "text";
+            if (name && type !== "submit" && type !== "file") {
+              inputs.push({
+                name,
+                type,
+                value: $page(input).attr("value") || "test",
+              });
+            }
+          });
+        if (inputs.length > 0) {
+          try {
+            allForms.push({
+              action: new URL(action, baseUrl).href,
+              method,
+              inputs,
+              pageUrl,
+            });
+          } catch (e) {}
+        }
+      });
+
+      $page("a[href]").each((i, el) => {
+        const href = $page(el).attr("href");
+        if (!href) return;
+        try {
+          const absolute = new URL(href, baseUrl).href;
+          if (absolute.startsWith(baseUrl) && !visited.has(absolute))
+            queue.push(absolute);
+        } catch (e) {}
+      });
+    } catch (e) {}
+  }
+
+  console.log(
+    `Crawled ${results.pagesScanned} authenticated pages, found ${allForms.length} forms`,
+  );
+
+  for (const form of allForms.slice(0, 10)) {
+    for (const payload of XSS_PAYLOADS.slice(0, 5)) {
+      try {
+        const fd = {};
+        form.inputs.forEach((i) => {
+          fd[i.name] = payload;
+        });
+        const response = await authedInstance.post(form.action, fd);
+        const body = typeof response.data === "string" ? response.data : "";
+        if (body.includes(payload) && !body.includes("&lt;")) {
+          results.findings.push({
+            type: "Authenticated XSS",
+            severity: "High",
+            owasp: "A03:2021 - Injection",
+            parameter: form.inputs.map((i) => i.name).join(", "),
+            endpoint: form.action,
+            method: "POST",
+            payload,
+            detail:
+              "XSS found in authenticated page. Can lead to session hijacking of logged-in users.",
+            evidence: `Payload "${payload}" reflected in authenticated response`,
+            remediation:
+              "Encode all output. Use CSP. Use framework auto-escaping.",
+          });
+          break;
+        }
+      } catch (e) {}
+    }
+
+    for (const payload of SQLI_PAYLOADS.slice(0, 5)) {
+      try {
+        const fd = {};
+        form.inputs.forEach((i) => {
+          fd[i.name] = payload;
+        });
+        const response = await authedInstance.post(form.action, fd);
+        const body = (
+          typeof response.data === "string" ? response.data : ""
+        ).toLowerCase();
+        const err = SQL_ERRORS.find((e) => body.includes(e));
+        if (err) {
+          results.findings.push({
+            type: "Authenticated SQL Injection",
+            severity: "Critical",
+            owasp: "A03:2021 - Injection",
+            parameter: form.inputs.map((i) => i.name).join(", "),
+            endpoint: form.action,
+            method: "POST",
+            payload,
+            detail:
+              "SQL injection found in authenticated area. Full database access possible.",
+            evidence: `SQL error "${err}" in authenticated endpoint`,
+            remediation: "Use parameterized queries everywhere.",
+          });
+          break;
+        }
+      } catch (e) {}
+    }
+  }
+
+  const idorFindings = await testIDOR(
+    results.authenticatedUrls,
+    authedInstance,
+    baseUrl,
+  );
+  results.findings.push(...idorFindings);
+
+  return results;
 }
 
 // ── Main Deep Scan ────────────────────────────────────
@@ -1231,7 +1581,6 @@ async function deepScan(targetUrl) {
       results.findings.push(...xss, ...sqli, ...blind);
     }
 
-    // Remove duplicates
     const seen = new Set();
     results.findings = results.findings.filter((f) => {
       const key = `${f.type}-${f.endpoint || ""}-${f.parameter || ""}`;
@@ -1266,4 +1615,4 @@ async function deepScan(targetUrl) {
   }
 }
 
-module.exports = { deepScan };
+module.exports = { deepScan, authenticatedScan };
