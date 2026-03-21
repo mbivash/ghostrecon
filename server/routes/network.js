@@ -1,10 +1,36 @@
 const express = require("express");
 const router = express.Router();
-const { exec } = require("child_process");
-const db = require("../database");
+const axios = require("axios");
+const dns = require("dns").promises;
+const { scansDb } = require("../database");
 
-router.post("/scan", (req, res) => {
-  const { target, scanType, consent } = req.body;
+async function resolveToIP(target) {
+  const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipRegex.test(target)) return target;
+  try {
+    const addresses = await dns.resolve4(target);
+    return addresses[0];
+  } catch (e) {
+    throw new Error(`Could not resolve domain: ${target}`);
+  }
+}
+
+async function scanWithShodan(ip) {
+  try {
+    const res = await axios.get(`https://internetdb.shodan.io/${ip}`, {
+      timeout: 15000,
+    });
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return { ip, ports: [], hostnames: [], tags: [], vulns: [], cpes: [] };
+    }
+    throw new Error("Shodan API failed: " + err.message);
+  }
+}
+
+router.post("/scan", async (req, res) => {
+  const { target, consent } = req.body;
 
   if (!consent) {
     return res.status(403).json({
@@ -16,82 +42,91 @@ router.post("/scan", (req, res) => {
     return res.status(400).json({ error: "Target is required." });
   }
 
-  const flags = {
-    quick: "-T4 -F --open",
-    ping: "-sn",
-    full: "-T4 -A --open",
-  };
+  try {
+    console.log("Resolving target:", target);
+    const ip = await resolveToIP(target.trim());
+    console.log("Resolved to IP:", ip);
 
-  const flag = flags[scanType] || flags.quick;
-  const nmapPath = `"C:\\Program Files (x86)\\Nmap\\nmap.exe"`;
-  const command = `${nmapPath} ${flag} ${target}`;
+    const shodanData = await scanWithShodan(ip);
+    console.log("Shodan data:", shodanData);
 
-  console.log("Running:", command);
+    // Format ports like the old nmap output
+    const ports = (shodanData.ports || []).map((port) => ({
+      port: String(port),
+      protocol: "tcp",
+      state: "open",
+      service: getServiceName(port),
+    }));
 
-  exec(
-    command,
-    { timeout: 120000, maxBuffer: 1024 * 1024 * 10 },
-    (error, stdout, stderr) => {
-      console.log("=== RAW OUTPUT START ===");
-      console.log(stdout);
-      console.log("=== RAW OUTPUT END ===");
+    // Format vulnerabilities
+    const vulns = (shodanData.vulns || []).map((vuln) => ({
+      id: vuln,
+      severity: vuln.startsWith("CVE") ? "High" : "Medium",
+      url: `https://nvd.nist.gov/vuln/detail/${vuln}`,
+    }));
 
-      if (!stdout || stdout.trim() === "") {
-        return res.status(500).json({ error: "Nmap returned no output." });
-      }
+    const resultData = {
+      target,
+      host:
+        shodanData.hostnames?.length > 0
+          ? `${shodanData.hostnames[0]} (${ip})`
+          : ip,
+      ip,
+      ports,
+      vulns,
+      tags: shodanData.tags || [],
+      cpes: shodanData.cpes || [],
+      hostnames: shodanData.hostnames || [],
+      duration: "instant",
+      source: "Shodan InternetDB",
+      scannedAt: new Date().toISOString(),
+    };
 
-      const ports = [];
-      const lines = stdout.split("\n");
+    // Save to database
+    scansDb
+      .insert({
+        type: "Network Scan",
+        target: target,
+        result: resultData,
+        findings_count: ports.length + vulns.length,
+        severity:
+          vulns.length > 0 ? "high" : ports.length > 0 ? "medium" : "info",
+        scanned_at: new Date().toISOString(),
+      })
+      .then(() => console.log("Scan saved"))
+      .catch((e) => console.error(e));
 
-      lines.forEach((line) => {
-        const trimmed = line.trim();
-        const match = trimmed.match(/^(\d+)\/(tcp|udp)\s+(\S+)\s*(.*)$/);
-        if (match) {
-          ports.push({
-            port: match[1],
-            protocol: match[2],
-            state: match[3],
-            service: match[4] ? match[4].trim() : "unknown",
-          });
-        }
-      });
-
-      const hostMatch = stdout.match(/Nmap scan report for (.+)/);
-      const host = hostMatch ? hostMatch[1].trim() : target;
-
-      const timeMatch = stdout.match(/scanned in ([\d.]+) seconds/);
-      const duration = timeMatch ? timeMatch[1] + "s" : "done";
-
-      const resultData = {
-        target,
-        host,
-        ports,
-        duration,
-        raw: stdout,
-        scannedAt: new Date().toISOString(),
-      };
-
-      // Save to database
-      try {
-        const { scansDb } = require("../database");
-        scansDb
-          .insert({
-            type: "Network Scan",
-            target: target,
-            result: resultData,
-            findings_count: ports.length,
-            severity: ports.length > 0 ? "medium" : "info",
-            scanned_at: new Date().toISOString(),
-          })
-          .then(() => console.log("Scan saved"))
-          .catch((e) => console.error(e));
-      } catch (dbErr) {
-        console.error("DB save error:", dbErr);
-      }
-
-      res.json({ success: true, data: resultData });
-    },
-  );
+    res.json({ success: true, data: resultData });
+  } catch (err) {
+    console.error("Scan error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
+
+function getServiceName(port) {
+  const services = {
+    21: "ftp",
+    22: "ssh",
+    23: "telnet",
+    25: "smtp",
+    53: "dns",
+    80: "http",
+    110: "pop3",
+    143: "imap",
+    443: "https",
+    445: "smb",
+    3306: "mysql",
+    3389: "rdp",
+    5432: "postgresql",
+    6379: "redis",
+    8080: "http-alt",
+    8443: "https-alt",
+    27017: "mongodb",
+    5900: "vnc",
+    11211: "memcached",
+    9200: "elasticsearch",
+  };
+  return services[port] || "unknown";
+}
 
 module.exports = router;
