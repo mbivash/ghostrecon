@@ -21,14 +21,6 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
     (f) => f.severity === "Low" || f.severity === "LOW",
   ).length;
 
-  const severityColor =
-    critical > 0
-      ? "#E24B4A"
-      : high > 0
-        ? "#E24B4A"
-        : medium > 0
-          ? "#BA7517"
-          : "#639922";
   const urgency =
     critical > 0
       ? "CRITICAL"
@@ -37,6 +29,14 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
         : medium > 0
           ? "MEDIUM"
           : "LOW";
+  const severityColor =
+    critical > 0
+      ? "#E24B4A"
+      : high > 0
+        ? "#E24B4A"
+        : medium > 0
+          ? "#BA7517"
+          : "#639922";
 
   const findingsHtml = findings
     .slice(0, 5)
@@ -44,11 +44,11 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
       (f) => `
     <tr>
       <td style="padding:10px 14px;border-bottom:1px solid #1e1e22;">
-        <span style="
-          display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;
-          background:${f.severity === "High" || f.severity === "Critical" ? "#1a0a0a" : f.severity === "Medium" ? "#1a1200" : "#0a1400"};
-          color:${f.severity === "High" || f.severity === "Critical" ? "#E24B4A" : f.severity === "Medium" ? "#BA7517" : "#639922"};
-        ">${f.severity}</span>
+        <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;
+          background:${f.severity === "High" || f.severity === "Critical" ? "#1a0a0a" : "#1a1200"};
+          color:${f.severity === "High" || f.severity === "Critical" ? "#E24B4A" : "#BA7517"};">
+          ${f.severity}
+        </span>
       </td>
       <td style="padding:10px 14px;border-bottom:1px solid #1e1e22;color:#ccc;font-size:13px;">
         ${f.type || f.issue || "Vulnerability found"}
@@ -64,14 +64,10 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
     <body style="margin:0;padding:0;background:#0d0d0f;font-family:system-ui,sans-serif;">
       <div style="max-width:600px;margin:0 auto;padding:32px 16px;">
         <div style="margin-bottom:24px;">
-          <span style="font-size:20px;font-weight:500;color:#e8e6f0;">
-            Ghost<span style="color:#7F77DD;">Recon</span>
-          </span>
+          <span style="font-size:20px;font-weight:500;color:#e8e6f0;">Ghost<span style="color:#7F77DD;">Recon</span></span>
           <span style="margin-left:12px;font-size:12px;color:#555;">Security Alerts</span>
         </div>
-        <div style="
-          background:#131315;border:1px solid ${severityColor};
-          border-radius:12px;padding:24px;margin-bottom:20px;">
+        <div style="background:#131315;border:1px solid ${severityColor};border-radius:12px;padding:24px;margin-bottom:20px;">
           <div style="font-size:12px;color:${severityColor};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
             ${urgency} SEVERITY ALERT
           </div>
@@ -81,54 +77,19 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
           <div style="font-size:13px;color:#777;">
             Target: <span style="color:#a89ff5;font-family:monospace;">${target}</span>
           </div>
-          <div style="font-size:13px;color:#777;margin-top:4px;">
-            Scan type: ${scanType} · ${new Date(scanDate).toLocaleString()}
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">
-          ${[
-            { label: "Critical", val: critical, color: "#ff4444" },
-            { label: "High", val: high, color: "#E24B4A" },
-            { label: "Medium", val: medium, color: "#BA7517" },
-            { label: "Low", val: low, color: "#639922" },
-          ]
-            .map(
-              (s) => `
-            <div style="background:#131315;border:1px solid #1e1e22;border-radius:8px;padding:12px;text-align:center;">
-              <div style="font-size:20px;font-weight:500;color:${s.color};">${s.val}</div>
-              <div style="font-size:11px;color:#555;margin-top:2px;">${s.label}</div>
-            </div>
-          `,
-            )
-            .join("")}
         </div>
         <div style="background:#131315;border:1px solid #1e1e22;border-radius:12px;overflow:hidden;margin-bottom:20px;">
-          <div style="padding:12px 14px;border-bottom:1px solid #1e1e22;font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.6px;">
-            Top findings
-          </div>
           <table style="width:100%;border-collapse:collapse;">
             ${findingsHtml}
           </table>
-          ${
-            findings.length > 5
-              ? `
-            <div style="padding:10px 14px;font-size:12px;color:#555;text-align:center;">
-              + ${findings.length - 5} more findings
-            </div>
-          `
-              : ""
-          }
         </div>
         <div style="text-align:center;margin-bottom:24px;">
-          <a href="https://ghostrecon-gold.vercel.app" style="
-            display:inline-block;background:#7F77DD;color:white;
-            text-decoration:none;padding:12px 32px;
-            border-radius:8px;font-size:14px;font-weight:500;">
+          <a href="https://ghostrecon-gold.vercel.app" style="display:inline-block;background:#7F77DD;color:white;text-decoration:none;padding:12px 32px;border-radius:8px;font-size:14px;">
             View Full Report
           </a>
         </div>
         <div style="font-size:11px;color:#444;text-align:center;">
-          GhostRecon Security Platform · Automated Security Monitoring
+          GhostRecon Security Platform
         </div>
       </div>
     </body>
@@ -169,7 +130,7 @@ async function sendTestEmail(to) {
             Email alerts configured successfully
           </div>
           <div style="color:#777;font-size:13px;">
-            You will now receive automatic alerts when scheduled scans find vulnerabilities.
+            You will now receive automatic alerts when vulnerabilities are found.
           </div>
         </div>
       </div>
