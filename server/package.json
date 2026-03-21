@@ -25,6 +25,7 @@
     "node-nmap": "^4.0.0",
     "nodemailer": "^8.0.3",
     "pdfkit": "^0.18.0",
+    "resend": "^6.9.4",
     "ssl-checker": "^2.0.10",
     "whois-json": "^2.0.4"
   }

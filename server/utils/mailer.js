@@ -1,16 +1,10 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.log("Email not configured — skipping alert");
+  if (!process.env.RESEND_API_KEY) {
+    console.log("Resend not configured — skipping alert");
     return;
   }
 
@@ -49,17 +43,14 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
     .map(
       (f) => `
     <tr>
-      <td style="padding: 10px 14px; border-bottom: 1px solid #1e1e22;">
+      <td style="padding:10px 14px;border-bottom:1px solid #1e1e22;">
         <span style="
-          display: inline-block;
-          padding: 2px 8px;
-          border-radius: 10px;
-          font-size: 11px;
-          background: ${f.severity === "High" || f.severity === "Critical" ? "#1a0a0a" : f.severity === "Medium" ? "#1a1200" : "#0a1400"};
-          color: ${f.severity === "High" || f.severity === "Critical" ? "#E24B4A" : f.severity === "Medium" ? "#BA7517" : "#639922"};
+          display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;
+          background:${f.severity === "High" || f.severity === "Critical" ? "#1a0a0a" : f.severity === "Medium" ? "#1a1200" : "#0a1400"};
+          color:${f.severity === "High" || f.severity === "Critical" ? "#E24B4A" : f.severity === "Medium" ? "#BA7517" : "#639922"};
         ">${f.severity}</span>
       </td>
-      <td style="padding: 10px 14px; border-bottom: 1px solid #1e1e22; color: #ccc; font-size: 13px;">
+      <td style="padding:10px 14px;border-bottom:1px solid #1e1e22;color:#ccc;font-size:13px;">
         ${f.type || f.issue || "Vulnerability found"}
       </td>
     </tr>
@@ -70,26 +61,17 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
   const html = `
     <!DOCTYPE html>
     <html>
-    <head><meta charset="utf-8"></head>
     <body style="margin:0;padding:0;background:#0d0d0f;font-family:system-ui,sans-serif;">
       <div style="max-width:600px;margin:0 auto;padding:32px 16px;">
-
-        <!-- Header -->
         <div style="margin-bottom:24px;">
           <span style="font-size:20px;font-weight:500;color:#e8e6f0;">
             Ghost<span style="color:#7F77DD;">Recon</span>
           </span>
           <span style="margin-left:12px;font-size:12px;color:#555;">Security Alerts</span>
         </div>
-
-        <!-- Alert box -->
         <div style="
-          background:#131315;
-          border:1px solid ${severityColor};
-          border-radius:12px;
-          padding:24px;
-          margin-bottom:20px;
-        ">
+          background:#131315;border:1px solid ${severityColor};
+          border-radius:12px;padding:24px;margin-bottom:20px;">
           <div style="font-size:12px;color:${severityColor};text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
             ${urgency} SEVERITY ALERT
           </div>
@@ -103,14 +85,7 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
             Scan type: ${scanType} · ${new Date(scanDate).toLocaleString()}
           </div>
         </div>
-
-        <!-- Severity summary -->
-        <div style="
-          display:grid;
-          grid-template-columns:repeat(4,1fr);
-          gap:10px;
-          margin-bottom:20px;
-        ">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">
           ${[
             { label: "Critical", val: critical, color: "#ff4444" },
             { label: "High", val: high, color: "#E24B4A" },
@@ -127,8 +102,6 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
             )
             .join("")}
         </div>
-
-        <!-- Findings table -->
         <div style="background:#131315;border:1px solid #1e1e22;border-radius:12px;overflow:hidden;margin-bottom:20px;">
           <div style="padding:12px 14px;border-bottom:1px solid #1e1e22;font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.6px;">
             Top findings
@@ -146,24 +119,14 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
               : ""
           }
         </div>
-
-        <!-- CTA -->
         <div style="text-align:center;margin-bottom:24px;">
           <a href="https://ghostrecon-gold.vercel.app" style="
-            display:inline-block;
-            background:#7F77DD;
-            color:white;
-            text-decoration:none;
-            padding:12px 32px;
-            border-radius:8px;
-            font-size:14px;
-            font-weight:500;
-          ">
+            display:inline-block;background:#7F77DD;color:white;
+            text-decoration:none;padding:12px 32px;
+            border-radius:8px;font-size:14px;font-weight:500;">
             View Full Report
           </a>
         </div>
-
-        <!-- Footer -->
         <div style="font-size:11px;color:#444;text-align:center;">
           GhostRecon Security Platform · Automated Security Monitoring
         </div>
@@ -173,8 +136,8 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
   `;
 
   try {
-    await transporter.sendMail({
-      from: `"${process.env.EMAIL_FROM || "GhostRecon Alerts"}" <${process.env.EMAIL_USER}>`,
+    await resend.emails.send({
+      from: "GhostRecon Alerts <onboarding@resend.dev>",
       to,
       subject: `[GhostRecon] ${urgency} — ${findings.length} vulnerabilities found on ${target}`,
       html,
@@ -186,14 +149,14 @@ async function sendVulnAlert({ to, target, findings, scanType, scanDate }) {
 }
 
 async function sendTestEmail(to) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  if (!process.env.RESEND_API_KEY) {
     throw new Error(
-      "Email not configured. Add EMAIL_USER and EMAIL_PASS to .env",
+      "Resend API key not configured. Add RESEND_API_KEY to .env",
     );
   }
 
-  await transporter.sendMail({
-    from: `"GhostRecon Alerts" <${process.env.EMAIL_USER}>`,
+  await resend.emails.send({
+    from: "GhostRecon Alerts <onboarding@resend.dev>",
     to,
     subject: "GhostRecon — Email alerts configured successfully",
     html: `
@@ -202,7 +165,9 @@ async function sendTestEmail(to) {
           Ghost<span style="color:#7F77DD;">Recon</span>
         </div>
         <div style="background:#131315;border:1px solid #085041;border-radius:12px;padding:20px;">
-          <div style="color:#1D9E75;font-size:14px;margin-bottom:8px;">Email alerts configured</div>
+          <div style="color:#1D9E75;font-size:14px;margin-bottom:8px;">
+            Email alerts configured successfully
+          </div>
           <div style="color:#777;font-size:13px;">
             You will now receive automatic alerts when scheduled scans find vulnerabilities.
           </div>
