@@ -10,6 +10,7 @@ export default function ScheduledScans() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [alertEmail, setAlertEmail] = useState("");
 
   useEffect(() => {
     fetchSchedules();
@@ -33,7 +34,7 @@ export default function ScheduledScans() {
     setError("");
     setSuccess("");
     try {
-      await api.post("/api/schedules", { target, type, frequency });
+      await api.post("/api/schedules", { target, type, frequency, alertEmail });
       setSuccess(`Scheduled ${type} on ${target} — runs ${frequency}`);
       setTarget("");
       fetchSchedules();
@@ -122,6 +123,25 @@ export default function ScheduledScans() {
               placeholder="e.g. example.com or http://example.com"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label
+              style={{
+                fontSize: "12px",
+                color: "#666",
+                display: "block",
+                marginBottom: "6px",
+              }}
+            >
+              Alert email (optional)
+            </label>
+            <input
+              type="email"
+              placeholder="Send alerts to this email when vulnerabilities found"
+              value={alertEmail}
+              onChange={(e) => setAlertEmail(e.target.value)}
             />
           </div>
 

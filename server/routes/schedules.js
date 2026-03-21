@@ -171,6 +171,18 @@ async function runScheduledScan(schedule) {
       console.log(
         `Scheduled scan complete for ${schedule.target} — ${findingsCount} findings`,
       );
+      // Send email alert if findings found and email configured
+      if (findingsCount > 0 && schedule.alertEmail && result) {
+        const { sendVulnAlert } = require("../utils/mailer");
+        const findings = result.vulnerabilities || [];
+        await sendVulnAlert({
+          to: schedule.alertEmail,
+          target: schedule.target,
+          findings,
+          scanType: schedule.type,
+          scanDate: new Date().toISOString(),
+        });
+      }
     }
   } catch (err) {
     console.error("Scheduled scan error:", err);

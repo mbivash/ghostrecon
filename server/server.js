@@ -20,6 +20,7 @@ app.use("/api/ssl", auth, require("./routes/ssl"));
 app.use("/api/cve", auth, require("./routes/cve"));
 app.use("/api/takeover", auth, require("./routes/takeover"));
 app.use("/api/schedules", auth, require("./routes/schedules"));
+app.use("/api/email", auth, require("./routes/email"));
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "GhostRecon server running" });

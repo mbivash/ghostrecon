@@ -23,6 +23,7 @@
     "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
     "node-nmap": "^4.0.0",
+    "nodemailer": "^8.0.3",
     "pdfkit": "^0.18.0",
     "ssl-checker": "^2.0.10",
     "whois-json": "^2.0.4"

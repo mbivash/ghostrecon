@@ -14,7 +14,6 @@ const nav = [
       { label: "SSL/TLS checker", path: "/ssl" },
       { label: "CVE database", path: "/cve" },
       { label: "Subdomain takeover", path: "/takeover" },
-      { label: "Scheduled scans", path: "/schedules" },
     ],
   },
   {
@@ -24,9 +23,14 @@ const nav = [
   {
     section: "Output",
     items: [
+      { label: "Scheduled scans", path: "/schedules" },
       { label: "Report generator", path: "/reports" },
       { label: "Scan history", path: "/history" },
     ],
+  },
+  {
+    section: "Account",
+    items: [{ label: "Settings", path: "/settings" }],
   },
 ];
 
@@ -45,7 +49,6 @@ export default function Sidebar() {
         flexShrink: 0,
       }}
     >
-      {/* Logo */}
       <div
         style={{
           padding: "20px 18px",
@@ -109,7 +112,6 @@ export default function Sidebar() {
         </span>
       </div>
 
-      {/* Nav */}
       <div style={{ flex: 1, padding: "8px 0" }}>
         {nav.map((group) => (
           <div key={group.section}>
@@ -165,7 +167,6 @@ export default function Sidebar() {
         ))}
       </div>
 
-      {/* Footer */}
       <div
         style={{
           padding: "14px",

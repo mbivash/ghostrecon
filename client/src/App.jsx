@@ -12,6 +12,7 @@ import SSLChecker from "./pages/SSLChecker";
 import CVESearch from "./pages/CVESearch";
 import SubdomainTakeover from "./pages/SubdomainTakeover";
 import ScheduledScans from "./pages/ScheduledScans";
+import Settings from "./pages/Settings";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -33,6 +34,16 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Settings />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/schedules"
           element={
