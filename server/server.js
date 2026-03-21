@@ -3,9 +3,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const app = express();
-
 app.use(cors());
-
 app.use(express.json());
 
 app.use("/api/auth", require("./routes/auth"));
@@ -18,6 +16,7 @@ app.use("/api/reports", auth, require("./routes/reports"));
 app.use("/api/history", auth, require("./routes/history"));
 app.use("/api/osint", auth, require("./routes/osint"));
 app.use("/api/dashboard", auth, require("./routes/dashboard"));
+app.use("/api/ssl", auth, require("./routes/ssl"));
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "GhostRecon server running" });

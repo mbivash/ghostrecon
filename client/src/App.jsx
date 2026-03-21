@@ -8,6 +8,7 @@ import OsintEngine from "./pages/OsintEngine";
 import ReportGenerator from "./pages/ReportGenerator";
 import ScanHistory from "./pages/ScanHistory";
 import Login from "./pages/Login";
+import SSLChecker from "./pages/SSLChecker";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -29,6 +30,16 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route
+          path="/ssl"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <SSLChecker />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
         <Route path="/login" element={<Login />} />
         <Route
           path="/"

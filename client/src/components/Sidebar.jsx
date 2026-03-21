@@ -11,6 +11,7 @@ const nav = [
       { label: "Network scanner", path: "/network" },
       { label: "Web vuln scanner", path: "/webvuln" },
       { label: "OSINT engine", path: "/osint" },
+      { label: "SSL/TLS checker", path: "/ssl" },
     ],
   },
   {
