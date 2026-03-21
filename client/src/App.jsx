@@ -1,0 +1,106 @@
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import Sidebar from "./components/Sidebar";
+import Dashboard from "./pages/Dashboard";
+import NetworkScanner from "./pages/NetworkScanner";
+import WebVulnScanner from "./pages/WebVulnScanner";
+import PasswordTools from "./pages/PasswordTools";
+import OsintEngine from "./pages/OsintEngine";
+import ReportGenerator from "./pages/ReportGenerator";
+import ScanHistory from "./pages/ScanHistory";
+import Login from "./pages/Login";
+
+function ProtectedRoute({ children }) {
+  const token = localStorage.getItem("gr_token");
+  return token ? children : <Navigate to="/login" />;
+}
+
+function Layout({ children }) {
+  return (
+    <div style={{ display: "flex", minHeight: "100vh" }}>
+      <Sidebar />
+      <main style={{ flex: 1, background: "var(--gr-bg)", overflowY: "auto" }}>
+        {children}
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Dashboard />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/network"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <NetworkScanner />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/webvuln"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <WebVulnScanner />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/password"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <PasswordTools />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/osint"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <OsintEngine />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <ReportGenerator />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/history"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <ScanHistory />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </BrowserRouter>
+  );
+}
