@@ -54,7 +54,7 @@ const SQL_ERRORS = [
 ];
 
 const axiosInstance = axios.create({
-  timeout: 10000,
+  timeout: 30000,
   validateStatus: () => true,
   headers: {
     "User-Agent": "Mozilla/5.0 (compatible; GhostRecon Security Scanner)",
