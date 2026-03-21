@@ -280,18 +280,18 @@ router.post("/scan", async (req, res) => {
 
     // Save to database
     try {
-      db.prepare(
-        `
-        INSERT INTO scans (type, target, result, findings_count, severity)
-        VALUES (?, ?, ?, ?, ?)
-      `,
-      ).run(
-        "OSINT Scan",
-        domain,
-        JSON.stringify(result),
-        subdomains.length + techStack.length,
-        "info",
-      );
+      const { scansDb } = require("../database");
+      scansDb
+        .insert({
+          type: "OSINT Scan",
+          target: domain,
+          result: result,
+          findings_count: subdomains.length + techStack.length,
+          severity: "info",
+          scanned_at: new Date().toISOString(),
+        })
+        .then(() => console.log("OSINT scan saved"))
+        .catch((e) => console.error(e));
     } catch (dbErr) {
       console.error("DB save error:", dbErr);
     }

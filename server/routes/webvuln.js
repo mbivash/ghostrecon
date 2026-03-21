@@ -300,7 +300,7 @@ router.post("/scan", async (req, res) => {
     );
     // Save to database
     try {
-      const db = require("../database");
+      const { scansDb } = require("../database");
       const severity = vulnerabilities.some((v) => v.severity === "Critical")
         ? "critical"
         : vulnerabilities.some((v) => v.severity === "High")
@@ -310,34 +310,31 @@ router.post("/scan", async (req, res) => {
             : vulnerabilities.length > 0
               ? "low"
               : "info";
-
-      db.prepare(
-        `
-        INSERT INTO scans (type, target, result, findings_count, severity)
-        VALUES (?, ?, ?, ?, ?)
-      `,
-      ).run(
-        "Web Vuln Scan",
-        url,
-        JSON.stringify({
+      scansDb
+        .insert({
+          type: "Web Vuln Scan",
           target: url,
-          info,
-          vulnerabilities,
-          summary: {
-            critical: vulnerabilities.filter((v) => v.severity === "Critical")
-              .length,
-            high: vulnerabilities.filter((v) => v.severity === "High").length,
-            medium: vulnerabilities.filter((v) => v.severity === "Medium")
-              .length,
-            low: vulnerabilities.filter((v) => v.severity === "Low").length,
-            total: vulnerabilities.length,
+          result: {
+            target: url,
+            info,
+            vulnerabilities,
+            summary: {
+              critical: vulnerabilities.filter((v) => v.severity === "Critical")
+                .length,
+              high: vulnerabilities.filter((v) => v.severity === "High").length,
+              medium: vulnerabilities.filter((v) => v.severity === "Medium")
+                .length,
+              low: vulnerabilities.filter((v) => v.severity === "Low").length,
+              total: vulnerabilities.length,
+            },
+            scannedAt: new Date().toISOString(),
           },
-          scannedAt: new Date().toISOString(),
-        }),
-        vulnerabilities.length,
-        severity,
-      );
-      console.log("Web vuln scan saved to database");
+          findings_count: vulnerabilities.length,
+          severity,
+          scanned_at: new Date().toISOString(),
+        })
+        .then(() => console.log("Web vuln scan saved"))
+        .catch((e) => console.error(e));
     } catch (dbErr) {
       console.error("DB save error:", dbErr);
     }

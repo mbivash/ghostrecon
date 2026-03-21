@@ -1,50 +1,29 @@
 const express = require("express");
 const router = express.Router();
-const db = require("../database");
+const { scansDb } = require("../database");
 
-// Get all scans
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const scans = db
-      .prepare(
-        `
-      SELECT id, type, target, findings_count, severity, scanned_at
-      FROM scans
-      ORDER BY scanned_at DESC
-      LIMIT 100
-    `,
-      )
-      .all();
+    const scans = await scansDb.find({}).sort({ scanned_at: -1 }).limit(100);
     res.json({ success: true, scans });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get one scan by id
-router.get("/:id", (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
-    const scan = db
-      .prepare(
-        `
-      SELECT * FROM scans WHERE id = ?
-    `,
-      )
-      .get(req.params.id);
-
+    const scan = await scansDb.findOne({ _id: req.params.id });
     if (!scan) return res.status(404).json({ error: "Scan not found." });
-
-    scan.result = JSON.parse(scan.result);
     res.json({ success: true, scan });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Delete a scan
-router.delete("/:id", (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
-    db.prepare("DELETE FROM scans WHERE id = ?").run(req.params.id);
+    await scansDb.remove({ _id: req.params.id });
     res.json({ success: true, message: "Scan deleted." });
   } catch (err) {
     res.status(500).json({ error: err.message });

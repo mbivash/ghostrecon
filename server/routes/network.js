@@ -73,19 +73,18 @@ router.post("/scan", (req, res) => {
 
       // Save to database
       try {
-        db.prepare(
-          `
-        INSERT INTO scans (type, target, result, findings_count, severity)
-        VALUES (?, ?, ?, ?, ?)
-      `,
-        ).run(
-          "Network Scan",
-          target,
-          JSON.stringify(resultData),
-          ports.length,
-          ports.length > 0 ? "medium" : "info",
-        );
-        console.log("Scan saved to database");
+        const { scansDb } = require("../database");
+        scansDb
+          .insert({
+            type: "Network Scan",
+            target: target,
+            result: resultData,
+            findings_count: ports.length,
+            severity: ports.length > 0 ? "medium" : "info",
+            scanned_at: new Date().toISOString(),
+          })
+          .then(() => console.log("Scan saved"))
+          .catch((e) => console.error(e));
       } catch (dbErr) {
         console.error("DB save error:", dbErr);
       }
