@@ -1,10 +1,9 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "http://localhost:5000",
+  baseURL: "https://ghostrecon-api-dju7.onrender.com",
 });
 
-// Automatically attach token to every request
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("gr_token");
   if (token) {
@@ -13,7 +12,6 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// If token expires redirect to login
 api.interceptors.response.use(
   (response) => response,
   (error) => {
