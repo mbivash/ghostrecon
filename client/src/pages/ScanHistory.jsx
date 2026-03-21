@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../utils/api";
 
-const API = "http://localhost:5000";
-
 const SEVERITY_STYLE = {
   critical: { bg: "#1a0505", color: "#ff4444", border: "#600" },
   high: { bg: "#1a0a0a", color: "#E24B4A", border: "#791F1F" },
@@ -26,7 +24,7 @@ export default function ScanHistory() {
   const fetchScans = async () => {
     setLoading(true);
     try {
-      const res = await api.get(`${API}/api/history`);
+      const res = await api.get("/api/history");
       setScans(res.data.scans);
     } catch (err) {
       console.error(err);
@@ -39,7 +37,7 @@ export default function ScanHistory() {
     setDetailLoading(true);
     setSelected(id);
     try {
-      const res = await axios.get(`${API}/api/history/${id}`);
+      const res = await api.get(`/api/history/${id}`);
       setDetail(res.data.scan);
     } catch (err) {
       console.error(err);
@@ -51,8 +49,8 @@ export default function ScanHistory() {
   const deleteScan = async (id, e) => {
     e.stopPropagation();
     try {
-      await axios.delete(`${API}/api/history/${id}`);
-      setScans(scans.filter((s) => s.id !== id));
+      await api.delete(`/api/history/${id}`);
+      setScans(scans.filter((s) => (s._id || s.id) !== id));
       if (selected === id) {
         setSelected(null);
         setDetail(null);
@@ -69,7 +67,6 @@ export default function ScanHistory() {
 
   return (
     <div style={{ padding: "32px", maxWidth: "1100px" }}>
-      {/* Header */}
       <div
         style={{
           marginBottom: "28px",
@@ -102,7 +99,6 @@ export default function ScanHistory() {
         </button>
       </div>
 
-      {/* Filter tabs */}
       <div
         style={{
           display: "flex",
@@ -140,7 +136,6 @@ export default function ScanHistory() {
       </div>
 
       <div style={{ display: "flex", gap: "16px" }}>
-        {/* Scans list */}
         <div style={{ flex: 1 }}>
           {loading ? (
             <div
@@ -184,7 +179,6 @@ export default function ScanHistory() {
                 overflow: "hidden",
               }}
             >
-              {/* Table header */}
               <div
                 style={{
                   display: "grid",
@@ -207,11 +201,12 @@ export default function ScanHistory() {
               {filtered.map((scan, i) => {
                 const sev =
                   SEVERITY_STYLE[scan.severity] || SEVERITY_STYLE.info;
-                const isSelected = selected === scan.id;
+                const scanId = scan._id || scan.id;
+                const isSelected = selected === scanId;
                 return (
                   <div
-                    key={scan.id}
-                    onClick={() => fetchDetail(scan.id)}
+                    key={scanId}
+                    onClick={() => fetchDetail(scanId)}
                     style={{
                       display: "grid",
                       gridTemplateColumns: "1fr 140px 80px 80px 40px",
@@ -236,7 +231,6 @@ export default function ScanHistory() {
                         e.currentTarget.style.background = "transparent";
                     }}
                   >
-                    {/* Target */}
                     <div>
                       <div
                         style={{
@@ -257,8 +251,6 @@ export default function ScanHistory() {
                         {new Date(scan.scanned_at).toLocaleString()}
                       </div>
                     </div>
-
-                    {/* Type */}
                     <div
                       style={{
                         fontSize: "12px",
@@ -268,8 +260,6 @@ export default function ScanHistory() {
                     >
                       {scan.type}
                     </div>
-
-                    {/* Findings */}
                     <div
                       style={{
                         fontSize: "13px",
@@ -279,8 +269,6 @@ export default function ScanHistory() {
                     >
                       {scan.findings_count}
                     </div>
-
-                    {/* Severity badge */}
                     <div style={{ alignSelf: "center" }}>
                       <span
                         style={{
@@ -295,11 +283,9 @@ export default function ScanHistory() {
                         {scan.severity}
                       </span>
                     </div>
-
-                    {/* Delete button */}
                     <div style={{ alignSelf: "center", textAlign: "right" }}>
                       <button
-                        onClick={(e) => deleteScan(scan.id, e)}
+                        onClick={(e) => deleteScan(scanId, e)}
                         style={{
                           background: "none",
                           border: "none",
@@ -310,7 +296,6 @@ export default function ScanHistory() {
                           borderRadius: "4px",
                           lineHeight: 1,
                         }}
-                        title="Delete scan"
                       >
                         ×
                       </button>
@@ -322,7 +307,6 @@ export default function ScanHistory() {
           )}
         </div>
 
-        {/* Detail panel */}
         {selected && (
           <div
             style={{
@@ -370,8 +354,7 @@ export default function ScanHistory() {
                   {detail.target}
                 </div>
 
-                {/* Network scan detail */}
-                {detail.result.ports && (
+                {detail.result?.ports && (
                   <div>
                     <div
                       style={{
@@ -415,8 +398,7 @@ export default function ScanHistory() {
                   </div>
                 )}
 
-                {/* Web vuln detail */}
-                {detail.result.vulnerabilities && (
+                {detail.result?.vulnerabilities && (
                   <div>
                     <div
                       style={{

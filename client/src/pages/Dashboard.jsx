@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import api from "../utils/api";
 
-const API = "http://localhost:5000";
-
 const modules = [
   {
     name: "Network scanner",
@@ -67,7 +65,7 @@ export default function Dashboard() {
 
   const fetchStats = async () => {
     try {
-      const res = await axios.get(`${API}/api/dashboard/stats`);
+      const res = await api.get(`/api/dashboard/stats`);
       setStats(res.data.stats);
     } catch (err) {
       console.error("Failed to load stats:", err);

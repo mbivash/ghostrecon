@@ -17,7 +17,7 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      const res = await aapi.post("http://localhost:5000/api/auth/login", {
+      const res = await api.post("/api/auth/login", {
         email,
         password,
       });
@@ -37,7 +37,7 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      await api.post("http://localhost:5000/api/auth/register", {
+      await api.post("/api/auth/register", {
         name,
         email,
         password,

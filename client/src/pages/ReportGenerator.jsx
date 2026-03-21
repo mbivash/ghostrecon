@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../utils/api";
 
-const API = "http://localhost:5000";
-
 export default function ReportGenerator() {
   const [scans, setScans] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -21,7 +19,7 @@ export default function ReportGenerator() {
   const fetchScans = async () => {
     setLoadingScans(true);
     try {
-      const res = await api.get(`${API}/api/history`);
+      const res = await api.get("/api/history");
       setScans(res.data.scans);
     } catch (err) {
       console.error(err);
@@ -40,7 +38,7 @@ export default function ReportGenerator() {
     if (selected.length === scans.length) {
       setSelected([]);
     } else {
-      setSelected(scans.map((s) => s.id));
+      setSelected(scans.map((s) => s._id || s.id));
     }
   };
 
@@ -55,15 +53,14 @@ export default function ReportGenerator() {
     setSuccess(false);
 
     try {
-      // Fetch full details for each selected scan
       const scanDetails = await Promise.all(
         selected.map((id) =>
-          axios.get(`${API}/api/history/${id}`).then((r) => r.data.scan.result),
+          api.get(`/api/history/${id}`).then((r) => r.data.scan.result),
         ),
       );
 
-      const response = await axios.post(
-        `${API}/api/reports/generate`,
+      const response = await api.post(
+        "/api/reports/generate",
         {
           clientName,
           reportTitle: reportTitle || "Security Assessment Report",
@@ -73,7 +70,6 @@ export default function ReportGenerator() {
         { responseType: "blob" },
       );
 
-      // Auto download
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -103,7 +99,6 @@ export default function ReportGenerator() {
 
   return (
     <div style={{ padding: "32px", maxWidth: "900px" }}>
-      {/* Header */}
       <div style={{ marginBottom: "28px" }}>
         <h1 style={{ fontSize: "22px", fontWeight: "500", color: "#e8e6f0" }}>
           Report Generator
@@ -117,7 +112,6 @@ export default function ReportGenerator() {
       <div
         style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}
       >
-        {/* Left — Scan selector */}
         <div>
           <div
             style={{
@@ -187,11 +181,12 @@ export default function ReportGenerator() {
               scans.map((scan, i) => {
                 const sev =
                   SEVERITY_STYLE[scan.severity] || SEVERITY_STYLE.info;
-                const isSelected = selected.includes(scan.id);
+                const scanId = scan._id || scan.id;
+                const isSelected = selected.includes(scanId);
                 return (
                   <div
-                    key={scan.id}
-                    onClick={() => toggleScan(scan.id)}
+                    key={scanId}
+                    onClick={() => toggleScan(scanId)}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -215,7 +210,6 @@ export default function ReportGenerator() {
                         e.currentTarget.style.background = "transparent";
                     }}
                   >
-                    {/* Checkbox */}
                     <div
                       style={{
                         width: "16px",
@@ -248,7 +242,6 @@ export default function ReportGenerator() {
                       )}
                     </div>
 
-                    {/* Scan info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
@@ -274,7 +267,6 @@ export default function ReportGenerator() {
                       </div>
                     </div>
 
-                    {/* Severity */}
                     <span
                       style={{
                         fontSize: "10px",
@@ -303,7 +295,6 @@ export default function ReportGenerator() {
           )}
         </div>
 
-        {/* Right — Report details */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div
             style={{
@@ -408,7 +399,6 @@ export default function ReportGenerator() {
                 : `Generate PDF — ${selected.length} scan${selected.length !== 1 ? "s" : ""}`}
             </button>
 
-            {/* What's included */}
             <div
               style={{ borderTop: "0.5px solid #1e1e22", paddingTop: "14px" }}
             >

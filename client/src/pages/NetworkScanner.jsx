@@ -1,8 +1,6 @@
 import { useState } from "react";
 import api from "../utils/api";
 
-const API = "http://localhost:5000";
-
 export default function NetworkScanner() {
   const [target, setTarget] = useState("");
   const [scanType, setScanType] = useState("quick");
@@ -26,7 +24,7 @@ export default function NetworkScanner() {
     setResults(null);
 
     try {
-      const res = await api.post(`${API}/api/network/scan`, {
+      const res = await api.post(`/api/network/scan`, {
         target: target.trim(),
         scanType,
         consent,

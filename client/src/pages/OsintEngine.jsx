@@ -1,8 +1,6 @@
 import { useState } from "react";
 import api from "../utils/api";
 
-const API = "http://localhost:5000";
-
 export default function OsintEngine() {
   const [target, setTarget] = useState("");
   const [consent, setConsent] = useState(false);
@@ -36,7 +34,7 @@ export default function OsintEngine() {
     }, 4000);
 
     try {
-      const res = await api.post(`${API}/api/osint/scan`, {
+      const res = await api.post(`/api/osint/scan`, {
         target: target.trim(),
         consent,
       });

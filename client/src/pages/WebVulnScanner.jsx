@@ -1,8 +1,6 @@
 import { useState } from "react";
 import api from "../utils/api";
 
-const API = "http://localhost:5000";
-
 const SEVERITY_STYLES = {
   Critical: { bg: "#1a0505", color: "#ff4444", border: "#600" },
   High: { bg: "#1a0a0a", color: "#E24B4A", border: "#791F1F" },
@@ -26,7 +24,6 @@ export default function WebVulnScanner() {
     setError("");
     setResults(null);
 
-    // Show loading messages so user knows it's working
     const messages = [
       "Fetching target page...",
       "Checking security headers...",
@@ -43,7 +40,7 @@ export default function WebVulnScanner() {
     }, 3000);
 
     try {
-      const res = await api.post(`${API}/api/webvuln/scan`, {
+      const res = await api.post("/api/webvuln/scan", {
         target: target.trim(),
         consent,
       });
@@ -79,7 +76,6 @@ export default function WebVulnScanner() {
 
   return (
     <div style={{ padding: "32px", maxWidth: "900px" }}>
-      {/* Header */}
       <div style={{ marginBottom: "28px" }}>
         <h1 style={{ fontSize: "22px", fontWeight: "500", color: "#e8e6f0" }}>
           Web Vulnerability Scanner
@@ -89,7 +85,6 @@ export default function WebVulnScanner() {
         </p>
       </div>
 
-      {/* Form */}
       <div
         style={{
           background: "#131315",
@@ -177,7 +172,6 @@ export default function WebVulnScanner() {
         </div>
       </div>
 
-      {/* Loading */}
       {loading && (
         <div
           style={{
@@ -211,10 +205,8 @@ export default function WebVulnScanner() {
         </div>
       )}
 
-      {/* Results */}
       {results && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Summary cards */}
           <div
             style={{
               display: "grid",
@@ -270,7 +262,6 @@ export default function WebVulnScanner() {
             ))}
           </div>
 
-          {/* Target info */}
           <div
             style={{
               background: "#131315",
@@ -316,7 +307,6 @@ export default function WebVulnScanner() {
             </div>
           </div>
 
-          {/* Vulnerabilities list */}
           <div
             style={{
               background: "#131315",

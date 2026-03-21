@@ -1,8 +1,6 @@
 import { useState } from "react";
 import api from "../utils/api";
 
-const API = "http://localhost:5000";
-
 const TABS = [
   "Hash Identifier",
   "Hash Cracker",
@@ -15,7 +13,6 @@ export default function PasswordTools() {
 
   return (
     <div style={{ padding: "32px", maxWidth: "800px" }}>
-      {/* Header */}
       <div style={{ marginBottom: "28px" }}>
         <h1 style={{ fontSize: "22px", fontWeight: "500", color: "#e8e6f0" }}>
           Password Tools
@@ -25,7 +22,6 @@ export default function PasswordTools() {
         </p>
       </div>
 
-      {/* Tabs */}
       <div
         style={{
           display: "flex",
@@ -58,7 +54,6 @@ export default function PasswordTools() {
         ))}
       </div>
 
-      {/* Tab content */}
       {activeTab === 0 && <HashIdentifier />}
       {activeTab === 1 && <HashCracker />}
       {activeTab === 2 && <StrengthAnalyzer />}
@@ -67,7 +62,6 @@ export default function PasswordTools() {
   );
 }
 
-// ── Hash Identifier ──────────────────────────────────
 function HashIdentifier() {
   const [hash, setHash] = useState("");
   const [result, setResult] = useState(null);
@@ -77,7 +71,7 @@ function HashIdentifier() {
     if (!hash.trim()) return;
     setLoading(true);
     try {
-      const res = await api.post(`${API}/api/password/identify`, { hash });
+      const res = await api.post("/api/password/identify", { hash });
       setResult(res.data);
     } catch (e) {
       console.error(e);
@@ -174,7 +168,6 @@ function HashIdentifier() {
   );
 }
 
-// ── Hash Cracker ─────────────────────────────────────
 function HashCracker() {
   const [hash, setHash] = useState("");
   const [hashType, setHashType] = useState("auto");
@@ -186,10 +179,7 @@ function HashCracker() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await axios.post(`${API}/api/password/crack`, {
-        hash,
-        hashType,
-      });
+      const res = await api.post("/api/password/crack", { hash, hashType });
       setResult(res.data);
     } catch (e) {
       console.error(e);
@@ -293,7 +283,6 @@ function HashCracker() {
   );
 }
 
-// ── Strength Analyzer ────────────────────────────────
 function StrengthAnalyzer() {
   const [password, setPassword] = useState("");
   const [result, setResult] = useState(null);
@@ -304,9 +293,7 @@ function StrengthAnalyzer() {
     if (!password.trim()) return;
     setLoading(true);
     try {
-      const res = await axios.post(`${API}/api/password/strength`, {
-        password,
-      });
+      const res = await api.post("/api/password/strength", { password });
       setResult(res.data);
     } catch (e) {
       console.error(e);
@@ -355,7 +342,6 @@ function StrengthAnalyzer() {
 
       {result && (
         <Card>
-          {/* Score bar */}
           <div style={{ marginBottom: "20px" }}>
             <div
               style={{
@@ -405,8 +391,6 @@ function StrengthAnalyzer() {
               <span style={{ color: result.color }}>{result.crackTime}</span>
             </div>
           </div>
-
-          {/* Checks */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {Object.entries(result.checks).map(([check, passed]) => (
               <div
@@ -430,7 +414,6 @@ function StrengthAnalyzer() {
   );
 }
 
-// ── Password Generator ───────────────────────────────
 function PasswordGenerator() {
   const [length, setLength] = useState(16);
   const [options, setOptions] = useState({
@@ -444,7 +427,7 @@ function PasswordGenerator() {
 
   const generate = async () => {
     try {
-      const res = await axios.post(`${API}/api/password/generate`, {
+      const res = await api.post("/api/password/generate", {
         length,
         ...options,
       });
@@ -464,7 +447,6 @@ function PasswordGenerator() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
       <Card>
-        {/* Length slider */}
         <div style={{ marginBottom: "16px" }}>
           <div
             style={{
@@ -491,7 +473,6 @@ function PasswordGenerator() {
           />
         </div>
 
-        {/* Options */}
         <div
           style={{
             display: "grid",
@@ -567,7 +548,6 @@ function PasswordGenerator() {
   );
 }
 
-// ── Shared small components ──────────────────────────
 function Card({ children }) {
   return (
     <div
