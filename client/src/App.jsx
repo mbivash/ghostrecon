@@ -21,6 +21,9 @@ import Landing from "./pages/Landing";
 import WordPressScanner from "./pages/WordPressScanner";
 import S3Scanner from "./pages/S3Scanner";
 import DNSCheck from "./pages/DNSCheck";
+import SecretScanner from "./pages/SecretScanner";
+import GraphQLScanner from "./pages/GraphQLScanner";
+import OAuthTester from "./pages/OAuthTester";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -42,6 +45,36 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route
+          path="/secrets"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <SecretScanner />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/graphql-scan"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <GraphQLScanner />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/oauth"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <OAuthTester />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/dnscheck"
           element={

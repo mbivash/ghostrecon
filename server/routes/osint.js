@@ -3,7 +3,7 @@ const router = express.Router();
 const dns = require("dns").promises;
 const https = require("https");
 const http = require("http");
-const db = require("../database");
+const cheerio = require("cheerio");
 
 // ── Whois lookup ─────────────────────────────────────
 async function getWhois(domain) {
@@ -11,7 +11,6 @@ async function getWhois(domain) {
     const net = require("net");
     const client = net.createConnection(43, "whois.iana.org");
     let data = "";
-
     client.setTimeout(8000);
     client.on("connect", () => client.write(domain + "\r\n"));
     client.on("data", (chunk) => (data += chunk.toString()));
@@ -27,7 +26,6 @@ async function getWhois(domain) {
 // ── DNS Records ──────────────────────────────────────
 async function getDNSRecords(domain) {
   const records = {};
-
   const lookups = [
     { type: "A", fn: () => dns.resolve4(domain) },
     { type: "AAAA", fn: () => dns.resolve6(domain) },
@@ -36,16 +34,13 @@ async function getDNSRecords(domain) {
     { type: "NS", fn: () => dns.resolveNs(domain) },
     { type: "CNAME", fn: () => dns.resolveCname(domain) },
   ];
-
   for (const lookup of lookups) {
     try {
-      const result = await lookup.fn();
-      records[lookup.type] = result;
+      records[lookup.type] = await lookup.fn();
     } catch (e) {
       records[lookup.type] = [];
     }
   }
-
   return records;
 }
 
@@ -87,21 +82,16 @@ async function findSubdomains(domain) {
     "auth",
     "docs",
   ];
-
   const found = [];
-
   await Promise.all(
     commonSubs.map(async (sub) => {
       try {
         const fullDomain = `${sub}.${domain}`;
         await dns.resolve4(fullDomain);
         found.push(fullDomain);
-      } catch (e) {
-        // Not found — skip
-      }
+      } catch (e) {}
     }),
   );
-
   return found.sort();
 }
 
@@ -135,12 +125,9 @@ async function detectTech(domain) {
       timeout: 10000,
       headers: { "User-Agent": "Mozilla/5.0 (compatible; GhostRecon)" },
     };
-
     const tech = [];
-
     const req = https.request(options, (res) => {
       const headers = res.headers;
-
       if (headers["x-powered-by"])
         tech.push({ name: headers["x-powered-by"], category: "Framework" });
       if (headers["server"])
@@ -154,7 +141,6 @@ async function detectTech(domain) {
         tech.push({ name: "Drupal", category: "CMS" });
       if (headers["x-wordpress-logged-in"])
         tech.push({ name: "WordPress", category: "CMS" });
-
       let body = "";
       res.on("data", (chunk) => {
         if (body.length < 50000) body += chunk.toString();
@@ -182,15 +168,12 @@ async function detectTech(domain) {
           tech.push({ name: "Cloudflare", category: "CDN" });
         if (body.includes("google-analytics") || body.includes("gtag"))
           tech.push({ name: "Google Analytics", category: "Analytics" });
-
-        // Remove duplicates
         const unique = tech.filter(
           (t, i, arr) => arr.findIndex((x) => x.name === t.name) === i,
         );
         resolve(unique);
       });
     });
-
     req.on("error", () => resolve(tech));
     req.on("timeout", () => {
       req.destroy();
@@ -200,19 +183,58 @@ async function detectTech(domain) {
   });
 }
 
+// ── Email Harvester ───────────────────────────────────
+async function harvestEmails(targetUrl, html, domain) {
+  const emails = new Set();
+  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+
+  // Extract from HTML
+  const htmlEmails = html.match(emailPattern) || [];
+  htmlEmails.forEach((e) => {
+    if (e.endsWith(`.${domain}`) || e.includes(`@${domain}`)) {
+      emails.add(e.toLowerCase());
+    }
+  });
+
+  // Check mailto links
+  const $ = cheerio.load(html);
+  $('a[href^="mailto:"]').each((i, el) => {
+    const href = $(el).attr("href");
+    if (href) {
+      const email = href
+        .replace("mailto:", "")
+        .split("?")[0]
+        .trim()
+        .toLowerCase();
+      if (email.includes("@")) emails.add(email);
+    }
+  });
+
+  // Check meta tags
+  $('meta[name="author"]').each((i, el) => {
+    const content = $(el).attr("content") || "";
+    const metaEmails = content.match(emailPattern) || [];
+    metaEmails.forEach((e) => emails.add(e.toLowerCase()));
+  });
+
+  // Check schema.org markup
+  $('[itemprop="email"]').each((i, el) => {
+    const email = $(el).text().trim().toLowerCase();
+    if (email.includes("@")) emails.add(email);
+  });
+
+  return [...emails].slice(0, 50);
+}
+
 // ── Main OSINT route ─────────────────────────────────
 router.post("/scan", async (req, res) => {
   const { target, consent } = req.body;
 
-  if (!consent) {
+  if (!consent)
     return res.status(403).json({ error: "Authorization required." });
-  }
-
-  if (!target) {
+  if (!target)
     return res.status(400).json({ error: "Target domain is required." });
-  }
 
-  // Clean up target — remove http/https/www
   let domain = target
     .trim()
     .replace(/^https?:\/\//, "")
@@ -222,24 +244,19 @@ router.post("/scan", async (req, res) => {
   console.log("OSINT scan on:", domain);
 
   try {
-    // Run all lookups in parallel
     const [dnsRecords, subdomains, techStack] = await Promise.all([
       getDNSRecords(domain),
       findSubdomains(domain),
       detectTech(domain),
     ]);
 
-    // Get IP from A record then geolocate
     let geoIP = {};
     const ipList = dnsRecords.A || [];
     if (ipList.length > 0) {
       geoIP = await getGeoIP(ipList[0]);
     }
 
-    // Get whois
     const whoisRaw = await getWhois(domain);
-
-    // Parse useful whois fields
     const whoisParsed = {};
     const whoisLines = whoisRaw.split("\n");
     whoisLines.forEach((line) => {
@@ -266,6 +283,20 @@ router.post("/scan", async (req, res) => {
       }
     });
 
+    // Fetch HTML for email harvesting
+    let html = "";
+    try {
+      const axios = require("axios");
+      const pageRes = await axios.get(`http://${domain}`, {
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+      html = typeof pageRes.data === "string" ? pageRes.data : "";
+    } catch (e) {}
+
+    // Harvest emails
+    const emails = await harvestEmails(`http://${domain}`, html, domain);
+
     const result = {
       target: domain,
       dns: dnsRecords,
@@ -275,22 +306,34 @@ router.post("/scan", async (req, res) => {
       geoIP,
       techStack,
       ipList,
+      emails,
+      findings: [],
       scannedAt: new Date().toISOString(),
     };
 
-    // Save to database
+    // Add email finding if emails found
+    if (emails.length > 0) {
+      result.findings.push({
+        type: "Email Addresses Harvested",
+        severity: "Info",
+        detail: `Found ${emails.length} email address(es) associated with ${domain}: ${emails.join(", ")}`,
+        evidence: "Emails found in page source, mailto links, and meta tags",
+        remediation:
+          "Use contact forms instead of displaying email addresses. Use email obfuscation if emails must be shown.",
+      });
+    }
+
     try {
       const { scansDb } = require("../database");
       scansDb
         .insert({
           type: "OSINT Scan",
           target: domain,
-          result: result,
-          findings_count: subdomains.length + techStack.length,
+          result,
+          findings_count: subdomains.length + techStack.length + emails.length,
           severity: "info",
           scanned_at: new Date().toISOString(),
         })
-        .then(() => console.log("OSINT scan saved"))
         .catch((e) => console.error(e));
     } catch (dbErr) {
       console.error("DB save error:", dbErr);

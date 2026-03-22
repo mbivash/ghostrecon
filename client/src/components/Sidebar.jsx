@@ -20,6 +20,9 @@ const nav = [
       { label: "WordPress scanner", path: "/wordpress" },
       { label: "S3 bucket scanner", path: "/s3scan" },
       { label: "DNS security check", path: "/dnscheck" },
+      { label: "Secret scanner", path: "/secrets" },
+      { label: "GraphQL scanner", path: "/graphql-scan" },
+      { label: "OAuth tester", path: "/oauth" },
     ],
   },
   {

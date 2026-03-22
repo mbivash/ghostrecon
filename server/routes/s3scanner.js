@@ -22,8 +22,6 @@ const S3_PATTERNS = [
 
 async function crawlForS3URLs(targetUrl, baseUrl) {
   const foundBuckets = new Set();
-
-  // Fetch main page
   let html = "";
   try {
     const res = await axiosInstance.get(targetUrl);
@@ -32,7 +30,6 @@ async function crawlForS3URLs(targetUrl, baseUrl) {
     throw new Error("Could not reach target: " + e.message);
   }
 
-  // Extract S3 URLs from main page
   for (const pattern of S3_PATTERNS) {
     const matches = [...html.matchAll(pattern)];
     matches.forEach((m) => {
@@ -40,7 +37,6 @@ async function crawlForS3URLs(targetUrl, baseUrl) {
     });
   }
 
-  // Find and fetch JS files
   const $ = cheerio.load(html);
   const jsUrls = [];
   $("script[src]").each((i, el) => {
@@ -52,7 +48,6 @@ async function crawlForS3URLs(targetUrl, baseUrl) {
     } catch (e) {}
   });
 
-  // Fetch JS files and extract S3 URLs
   for (const jsUrl of jsUrls.slice(0, 8)) {
     try {
       const res = await axiosInstance.get(jsUrl);
@@ -66,7 +61,6 @@ async function crawlForS3URLs(targetUrl, baseUrl) {
     } catch (e) {}
   }
 
-  // Also check page source comments and data attributes
   const inlinePatterns = [
     /["']([a-z0-9][a-z0-9\-]{2,62})\.s3\.amazonaws\.com["']/gi,
     /bucket['":\s]+['"]([a-z0-9][a-z0-9\-]{2,62})['"]/gi,
@@ -110,6 +104,7 @@ function generatePossibleBuckets(domain) {
   return [...names];
 }
 
+// ── AWS S3 ────────────────────────────────────────────────────
 async function testBucket(bucketName, isConfirmed) {
   const findings = [];
   const bucketUrl = `https://${bucketName}.s3.amazonaws.com/`;
@@ -117,7 +112,6 @@ async function testBucket(bucketName, isConfirmed) {
 
   try {
     const res = await axiosInstance.get(bucketUrl);
-
     if (!res) return findings;
 
     if (res.status === 200) {
@@ -138,15 +132,15 @@ async function testBucket(bucketName, isConfirmed) {
           owasp: "A01:2021 - Broken Access Control",
           endpoint: bucketUrl,
           confirmed: isConfirmed,
+          provider: "AWS S3",
           detail: isConfirmed
-            ? `S3 bucket "${bucketName}" was found in the site source code and is publicly listable. Anyone can see and download all files. ${files.length > 0 ? `Files found: ${files.join(", ")}` : ""}`
-            : `S3 bucket "${bucketName}" matches naming patterns for this domain and is publicly listable. Verify if this bucket belongs to your organization. ${files.length > 0 ? `Files found: ${files.join(", ")}` : ""}`,
-          evidence: `GET ${bucketUrl} returned HTTP 200 with file listing${isConfirmed ? " — URL found in site source" : " — pattern-based detection"}`,
+            ? `S3 bucket "${bucketName}" found in site source and is publicly listable. Anyone can see and download all files. ${files.length > 0 ? `Files: ${files.join(", ")}` : ""}`
+            : `S3 bucket "${bucketName}" matches naming patterns. Publicly listable. Verify ownership. ${files.length > 0 ? `Files: ${files.join(", ")}` : ""}`,
+          evidence: `GET ${bucketUrl} returned HTTP 200 with file listing`,
           remediation:
-            "Enable S3 Block Public Access immediately. Set bucket ACL to private. Audit all files for sensitive data exposure.",
+            "Enable S3 Block Public Access. Set bucket ACL to private. Audit all files.",
         });
 
-        // Test write access
         try {
           const writeRes = await axiosInstance.request({
             method: "PUT",
@@ -162,10 +156,11 @@ async function testBucket(bucketName, isConfirmed) {
               owasp: "A01:2021 - Broken Access Control",
               endpoint: bucketUrl,
               confirmed: isConfirmed,
-              detail: `S3 bucket "${bucketName}" allows public write access. Attackers can upload malware, ransomware or phishing pages.`,
+              provider: "AWS S3",
+              detail: `S3 bucket "${bucketName}" allows public write access. Attackers can upload malware or phishing pages.`,
               evidence: `PUT ${bucketUrl} returned HTTP 200`,
               remediation:
-                "Remove public write permissions immediately. Use IAM roles for write access only.",
+                "Remove public write permissions immediately. Use IAM roles only.",
             });
           }
         } catch (e) {}
@@ -176,6 +171,7 @@ async function testBucket(bucketName, isConfirmed) {
           owasp: "A01:2021 - Broken Access Control",
           endpoint: bucketUrl,
           confirmed: isConfirmed,
+          provider: "AWS S3",
           detail: `S3 bucket "${bucketName}" returned HTTP 200. ${isConfirmed ? "Confirmed to belong to this site." : "Ownership unconfirmed."} Public access may be misconfigured.`,
           evidence: `GET ${bucketUrl} returned HTTP 200`,
           remediation:
@@ -190,15 +186,156 @@ async function testBucket(bucketName, isConfirmed) {
           owasp: "A01:2021 - Broken Access Control",
           endpoint: bucketUrl,
           confirmed: true,
-          detail: `S3 bucket "${bucketName}" was found in site source and is properly restricted (403). This is correct configuration.`,
-          evidence: `GET ${bucketUrl} returned HTTP 403 — bucket exists but is private`,
-          remediation:
-            "No action needed. Bucket is correctly configured as private.",
+          provider: "AWS S3",
+          detail: `S3 bucket "${bucketName}" found in site source and is properly restricted (403).`,
+          evidence: `GET ${bucketUrl} returned HTTP 403 — private`,
+          remediation: "No action needed. Bucket is correctly configured.",
         });
       }
     }
   } catch (e) {}
 
+  return findings;
+}
+
+// ── Azure Blob Storage ────────────────────────────────────────
+async function checkAzureBlob(accountName) {
+  const findings = [];
+  const containerNames = [
+    "public",
+    "assets",
+    "media",
+    "uploads",
+    "files",
+    "images",
+    "static",
+    "backup",
+    "data",
+    "cdn",
+  ];
+
+  for (const container of containerNames) {
+    try {
+      const url = `https://${accountName}.blob.core.windows.net/${container}?restype=container&comp=list`;
+      const res = await axiosInstance.get(url);
+      const body =
+        typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+
+      if (res.status === 200 && body.includes("EnumerationResults")) {
+        findings.push({
+          type: "Azure Blob Container Publicly Listable",
+          severity: "Critical",
+          owasp: "A01:2021 - Broken Access Control",
+          endpoint: url,
+          confirmed: false,
+          provider: "Azure Blob Storage",
+          detail: `Azure Blob Storage container "${container}" in account "${accountName}" is publicly listable. Anyone can see and download all files.`,
+          evidence: `GET ${url} returned container listing`,
+          remediation:
+            "Set container access level to Private. Enable Azure Storage firewall.",
+        });
+      } else if (res.status === 200) {
+        findings.push({
+          type: "Azure Blob Container Publicly Accessible",
+          severity: "High",
+          owasp: "A01:2021 - Broken Access Control",
+          endpoint: `https://${accountName}.blob.core.windows.net/${container}`,
+          confirmed: false,
+          provider: "Azure Blob Storage",
+          detail: `Azure Blob container "${container}" in account "${accountName}" returned HTTP 200. Public access may be enabled.`,
+          evidence: `GET ${url} returned HTTP 200`,
+          remediation: "Review Azure Blob container permissions.",
+        });
+      }
+    } catch (e) {}
+  }
+  return findings;
+}
+
+// ── Google Cloud Storage ──────────────────────────────────────
+async function checkGCSBucket(bucketName) {
+  const findings = [];
+  const gcsUrls = [
+    `https://storage.googleapis.com/${bucketName}/`,
+    `https://${bucketName}.storage.googleapis.com/`,
+  ];
+
+  for (const url of gcsUrls) {
+    try {
+      const res = await axiosInstance.get(url);
+      const body =
+        typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+
+      if (res.status === 200) {
+        const isListing =
+          body.includes("ListBucketResult") ||
+          body.includes('"items"') ||
+          body.includes("storage#objects");
+
+        if (isListing) {
+          findings.push({
+            type: "GCS Bucket Publicly Listable",
+            severity: "Critical",
+            owasp: "A01:2021 - Broken Access Control",
+            endpoint: url,
+            confirmed: false,
+            provider: "Google Cloud Storage",
+            detail: `Google Cloud Storage bucket "${bucketName}" is publicly listable. Anyone can see and download all files.`,
+            evidence: `GET ${url} returned bucket listing`,
+            remediation:
+              "Remove allUsers from bucket IAM. Enable uniform bucket-level access.",
+          });
+        } else {
+          findings.push({
+            type: "GCS Bucket Publicly Accessible",
+            severity: "High",
+            owasp: "A01:2021 - Broken Access Control",
+            endpoint: url,
+            confirmed: false,
+            provider: "Google Cloud Storage",
+            detail: `GCS bucket "${bucketName}" returned HTTP 200. Public access may be enabled.`,
+            evidence: `GET ${url} returned HTTP 200`,
+            remediation: "Review GCS bucket IAM permissions.",
+          });
+        }
+        break;
+      }
+    } catch (e) {}
+  }
+  return findings;
+}
+
+// ── DigitalOcean Spaces ───────────────────────────────────────
+async function checkDOSpaces(spaceName) {
+  const findings = [];
+  const regions = ["nyc3", "ams3", "sgp1", "fra1", "sfo3", "blr1"];
+
+  for (const region of regions.slice(0, 3)) {
+    try {
+      const url = `https://${spaceName}.${region}.digitaloceanspaces.com/`;
+      const res = await axiosInstance.get(url);
+      const body =
+        typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+
+      if (
+        res.status === 200 &&
+        (body.includes("ListBucketResult") || body.includes("<Contents>"))
+      ) {
+        findings.push({
+          type: "DigitalOcean Space Publicly Listable",
+          severity: "Critical",
+          owasp: "A01:2021 - Broken Access Control",
+          endpoint: url,
+          confirmed: false,
+          provider: "DigitalOcean Spaces",
+          detail: `DigitalOcean Space "${spaceName}" in ${region} is publicly listable.`,
+          evidence: `GET ${url} returned Space listing`,
+          remediation: "Set Space to private in DigitalOcean control panel.",
+        });
+        return findings;
+      }
+    } catch (e) {}
+  }
   return findings;
 }
 
@@ -214,7 +351,7 @@ router.post("/scan", async (req, res) => {
   if (!targetUrl.startsWith("http")) targetUrl = "http://" + targetUrl;
   const domain = new URL(targetUrl).hostname;
 
-  console.log("S3 scan for:", domain);
+  console.log("Cloud storage scan for:", domain);
 
   try {
     const results = {
@@ -224,6 +361,12 @@ router.post("/scan", async (req, res) => {
       possibleBuckets: [],
       findings: [],
       jsFilesScanned: 0,
+      cloudProviders: [
+        "AWS S3",
+        "Azure Blob Storage",
+        "Google Cloud Storage",
+        "DigitalOcean Spaces",
+      ],
       scannedAt: new Date().toISOString(),
     };
 
@@ -249,29 +392,53 @@ router.post("/scan", async (req, res) => {
       results.findings.push(...bucketFindings);
     }
 
-    // Step 3 — Generate and test possible buckets
+    // Step 3 — Generate possible bucket names
     const possibleNames = generatePossibleBuckets(domain);
     results.possibleBuckets = possibleNames.filter(
       (n) => !results.confirmedBuckets.includes(n),
     );
 
+    // Step 4 — Test possible AWS S3 buckets
     console.log(
-      `Testing ${Math.min(results.possibleBuckets.length, 10)} possible buckets...`,
+      `Testing ${Math.min(results.possibleBuckets.length, 10)} possible S3 buckets...`,
     );
     for (const bucketName of results.possibleBuckets.slice(0, 10)) {
       const bucketFindings = await testBucket(bucketName, false);
       results.findings.push(...bucketFindings);
     }
 
-    // Step 4 — If nothing found at all
+    // Step 5 — Check Azure Blob Storage
+    console.log("Checking Azure Blob Storage...");
+    for (const name of possibleNames.slice(0, 5)) {
+      const azureFindings = await checkAzureBlob(name);
+      results.findings.push(
+        ...azureFindings.filter((f) => f.severity !== "Info"),
+      );
+    }
+
+    // Step 6 — Check Google Cloud Storage
+    console.log("Checking GCS buckets...");
+    for (const name of possibleNames.slice(0, 5)) {
+      const gcsFindings = await checkGCSBucket(name);
+      results.findings.push(...gcsFindings);
+    }
+
+    // Step 7 — Check DigitalOcean Spaces
+    console.log("Checking DigitalOcean Spaces...");
+    for (const name of possibleNames.slice(0, 3)) {
+      const doFindings = await checkDOSpaces(name);
+      results.findings.push(...doFindings);
+    }
+
+    // Step 8 — Info finding if nothing confirmed
     if (results.confirmedBuckets.length === 0) {
       results.findings.push({
-        type: "No S3 Buckets Found in Site Source",
+        type: "No Cloud Storage Buckets Found in Site Source",
         severity: "Info",
-        detail: `No S3 bucket URLs were found in the page source or ${results.jsFilesScanned} JavaScript file(s) of ${targetUrl}. Either this site does not use AWS S3, or bucket URLs are loaded dynamically after page load.`,
-        evidence: `Scanned main page + ${results.jsFilesScanned} JS files`,
+        detail: `No cloud storage URLs found in page source or ${results.jsFilesScanned} JS file(s) of ${targetUrl}. Checked AWS S3, Azure Blob, GCS and DigitalOcean Spaces naming patterns.`,
+        evidence: `Scanned main page + ${results.jsFilesScanned} JS files across 4 cloud providers`,
         remediation:
-          "No action needed. If you use S3, verify buckets have Block Public Access enabled in the AWS console.",
+          "No action needed. If you use cloud storage, verify buckets are properly secured.",
       });
     }
 
@@ -288,6 +455,7 @@ router.post("/scan", async (req, res) => {
       confirmedBuckets: results.confirmedBuckets.length,
       possibleBuckets: results.possibleBuckets.length,
       jsFilesScanned: results.jsFilesScanned,
+      cloudProviders: 4,
       critical: results.findings.filter((f) => f.severity === "Critical")
         .length,
       high: results.findings.filter((f) => f.severity === "High").length,
@@ -308,7 +476,7 @@ router.post("/scan", async (req, res) => {
 
     scansDb
       .insert({
-        type: "S3 Bucket Scan",
+        type: "Cloud Storage Scan",
         userId: req.user?.id,
         target: domain,
         result: results,
@@ -320,7 +488,7 @@ router.post("/scan", async (req, res) => {
 
     res.json({ success: true, data: results });
   } catch (err) {
-    console.error("S3 scan error:", err);
+    console.error("Cloud storage scan error:", err);
     res.status(500).json({ error: err.message });
   }
 });
