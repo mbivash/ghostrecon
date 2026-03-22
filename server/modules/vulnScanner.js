@@ -1,6 +1,16 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
+const {
+  testAdvancedXSS,
+  testAdvancedSQLi,
+  testSSTI,
+  testPrototypePollution,
+  scanForSecrets,
+  fingerprintTechnologies,
+  testRequestSmuggling,
+} = require("./advancedScanner");
+
 const XSS_PAYLOADS = [
   "<script>alert(1)</script>",
   '"><script>alert(1)</script>',
@@ -1571,15 +1581,47 @@ async function deepScan(targetUrl) {
 
     results.findings.push(...authF, ...jwtF, ...ssrfF, ...traversalF);
 
-    console.log(`Testing ${Math.min(allForms.length, 10)} forms...`);
+    console.log(
+      `Testing ${Math.min(allForms.length, 10)} forms with advanced payloads...`,
+    );
     for (const form of allForms.slice(0, 10)) {
-      const [xss, sqli, blind] = await Promise.all([
+      const [xss, sqli, blind, advXss, advSqli, ssti] = await Promise.all([
         testXSS(form),
         testSQLi(form),
         testBlindSQLi(form),
+        testAdvancedXSS(form, baseUrl),
+        testAdvancedSQLi(form, baseUrl),
+        testSSTI(form, baseUrl),
       ]);
-      results.findings.push(...xss, ...sqli, ...blind);
+      results.findings.push(
+        ...xss,
+        ...sqli,
+        ...blind,
+        ...advXss,
+        ...advSqli,
+        ...ssti,
+      );
     }
+
+    // Advanced checks
+    console.log("Running advanced security checks...");
+    const [protoFindings, secretResult, techResult, smugglingFindings] =
+      await Promise.all([
+        testPrototypePollution(targetUrl),
+        scanForSecrets(targetUrl, baseUrl, html),
+        fingerprintTechnologies(targetUrl, html, headers),
+        testRequestSmuggling(targetUrl),
+      ]);
+
+    results.findings.push(
+      ...protoFindings,
+      ...secretResult.findings,
+      ...techResult.findings,
+      ...smugglingFindings,
+    );
+
+    results.secretsFound = secretResult.secretsFound;
+    results.technologies = techResult.detected;
 
     // Stored XSS test
     console.log("Testing for stored XSS...");

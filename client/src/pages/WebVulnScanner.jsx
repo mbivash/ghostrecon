@@ -207,7 +207,7 @@ export default function WebVulnScanner() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(6, 1fr)",
+              gridTemplateColumns: "repeat(8, 1fr)",
               gap: "10px",
             }}
           >
@@ -238,6 +238,16 @@ export default function WebVulnScanner() {
                 label: "Pages scanned",
                 val: results.pagesScanned,
                 color: "#7F77DD",
+              },
+              {
+                label: "Technologies",
+                val: results.technologies?.length || 0,
+                color: "#a89ff5",
+              },
+              {
+                label: "Secrets found",
+                val: results.secretsFound?.length || 0,
+                color: results.secretsFound?.length > 0 ? "#ff4444" : "#1D9E75",
               },
             ].map((s) => (
               <div
