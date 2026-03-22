@@ -18,6 +18,7 @@ import AuthenticatedScanner from "./pages/AuthenticatedScanner";
 import APIScanner from "./pages/APIScanner";
 import Compliance from "./pages/Compliance";
 import Landing from "./pages/Landing";
+import WordPressScanner from "./pages/WordPressScanner";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -39,6 +40,16 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route
+          path="/wordpress"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <WordPressScanner />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
         <Route path="/home" element={<Landing />} />
         <Route
           path="/apiscan"

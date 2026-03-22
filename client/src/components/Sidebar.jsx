@@ -17,6 +17,7 @@ const nav = [
       { label: "Email security", path: "/emailsecurity" },
       { label: "Authenticated scanner", path: "/authscan" },
       { label: "API scanner", path: "/apiscan" },
+      { label: "WordPress scanner", path: "/wordpress" },
     ],
   },
   {
