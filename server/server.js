@@ -63,6 +63,7 @@ app.use("/api/authscan", auth, require("./routes/authscan"));
 app.use("/api/apiscan", auth, require("./routes/apiscan"));
 app.use("/api/compliance", auth, require("./routes/compliance"));
 app.use("/api/wordpress", auth, require("./routes/wordpress"));
+app.use("/api/s3scan", auth, require("./routes/s3scanner"));
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "GhostRecon server running" });
