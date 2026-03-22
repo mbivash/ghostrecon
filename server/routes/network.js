@@ -265,45 +265,46 @@ const DEFAULT_CREDENTIALS = {
   ],
 };
 
-function scanPort(host, port, timeout = 3000) {
+function scanPort(host, port, timeout = 2000) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
-    let banner = "";
+    let connected = false;
 
     socket.setTimeout(timeout);
 
-    socket.connect(port, host, () => {
-      socket.setTimeout(2000);
-    });
-
-    socket.on("data", (data) => {
-      banner += data.toString("utf8", 0, 256);
-      socket.destroy();
-    });
-
     socket.on("connect", () => {
-      resolve({ open: true, banner: "" });
+      connected = true;
+      socket.destroy();
+      resolve({ open: true });
     });
-
-    socket.on("data", () => {});
 
     socket.on("timeout", () => {
       socket.destroy();
-      resolve({ open: true, banner: banner.trim() });
+      resolve({ open: false });
     });
 
     socket.on("error", (err) => {
       socket.destroy();
-      if (err.code === "ECONNREFUSED" || err.code === "EHOSTUNREACH") {
+      if (err.code === "ECONNREFUSED") {
         resolve({ open: false });
+      } else if (err.code === "EHOSTUNREACH" || err.code === "ENETUNREACH") {
+        resolve({ open: false });
+      } else if (err.code === "ECONNRESET") {
+        resolve({ open: true });
       } else {
         resolve({ open: false });
       }
     });
 
     socket.on("close", () => {
-      resolve({ open: true, banner: banner.trim() });
+      if (connected) {
+        resolve({ open: true });
+      } else {
+        resolve({ open: false });
+      }
     });
+
+    socket.connect(port, host);
   });
 }
 
