@@ -64,16 +64,8 @@ export default function APIScanner() {
         scanMode === "swagger" ? "/api/apiscan/swagger" : "/api/apiscan/scan";
       const payload =
         scanMode === "swagger"
-          ? {
-              target: target.trim(),
-              specUrl: specUrl.trim() || undefined,
-              consent,
-            }
-          : {
-              target: target.trim(),
-              authToken: authToken.trim() || undefined,
-              consent,
-            };
+          ? { target: target.trim(), specUrl: specUrl.trim() || undefined, consent }
+          : { target: target.trim(), authToken: authToken.trim() || undefined, consent };
 
       const res = await api.post(endpoint, payload);
       setResults(res.data.data);
@@ -102,8 +94,7 @@ export default function APIScanner() {
         </h1>
         <p style={{ fontSize: "13px", color: "#555", marginTop: "4px" }}>
           Test REST APIs for authentication flaws, injection, rate limiting,
-          CORS, mass assignment and more. Also supports OpenAPI/Swagger spec
-          testing.
+          CORS, mass assignment and more. Also supports OpenAPI/Swagger spec testing.
         </p>
       </div>
 
@@ -224,11 +215,8 @@ export default function APIScanner() {
                 onChange={(e) => setSpecUrl(e.target.value)}
                 style={{ fontFamily: "monospace", fontSize: "12px" }}
               />
-              <div
-                style={{ fontSize: "11px", color: "#444", marginTop: "4px" }}
-              >
-                Auto-checks: /swagger.json, /openapi.json, /api-docs,
-                /swagger/v1/swagger.json
+              <div style={{ fontSize: "11px", color: "#444", marginTop: "4px" }}>
+                Auto-checks: /swagger.json, /openapi.json, /api-docs, /swagger/v1/swagger.json
               </div>
             </div>
           ) : (
@@ -265,7 +253,9 @@ export default function APIScanner() {
               padding: "12px",
               background: "#0d0d0f",
               borderRadius: "8px",
-              border: consent ? "0.5px solid #3C3489" : "0.5px solid #1e1e22",
+              border: consent
+                ? "0.5px solid #3C3489"
+                : "0.5px solid #1e1e22",
             }}
           >
             <input
@@ -307,8 +297,8 @@ export default function APIScanner() {
             {loading
               ? "Scanning..."
               : scanMode === "swagger"
-                ? "Scan OpenAPI Spec"
-                : "Start API Scan"}
+              ? "Scan OpenAPI Spec"
+              : "Start API Scan"}
           </button>
         </div>
       </div>
@@ -352,6 +342,7 @@ export default function APIScanner() {
       {/* Results */}
       {results && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+
           {/* Spec found banner for swagger mode */}
           {results.specFound !== undefined && (
             <div
@@ -399,15 +390,8 @@ export default function APIScanner() {
                   </div>
                 )}
                 {results.specFound && summary.totalEndpoints && (
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#555",
-                      marginTop: "2px",
-                    }}
-                  >
-                    {summary.totalEndpoints} endpoints documented ·{" "}
-                    {summary.endpointsTested} tested
+                  <div style={{ fontSize: "11px", color: "#555", marginTop: "2px" }}>
+                    {summary.totalEndpoints} endpoints documented · {summary.endpointsTested} tested
                   </div>
                 )}
               </div>
@@ -433,10 +417,10 @@ export default function APIScanner() {
                   scanMode === "swagger"
                     ? "#7F77DD"
                     : (results.riskScore || 0) >= 60
-                      ? "#E24B4A"
-                      : (results.riskScore || 0) >= 30
-                        ? "#BA7517"
-                        : "#1D9E75",
+                    ? "#E24B4A"
+                    : (results.riskScore || 0) >= 30
+                    ? "#BA7517"
+                    : "#1D9E75",
               },
               {
                 label: scanMode === "swagger" ? "Tested" : "Endpoints",
@@ -544,19 +528,11 @@ export default function APIScanner() {
                     >
                       {ep.status}
                     </span>
-                    <span
-                      style={{
-                        color: "#ccc",
-                        fontFamily: "monospace",
-                        flex: 1,
-                      }}
-                    >
+                    <span style={{ color: "#ccc", fontFamily: "monospace", flex: 1 }}>
                       {ep.url}
                     </span>
                     {ep.isJSON && (
-                      <span style={{ color: "#7F77DD", fontSize: "10px" }}>
-                        JSON
-                      </span>
+                      <span style={{ color: "#7F77DD", fontSize: "10px" }}>JSON</span>
                     )}
                   </div>
                 ))}
@@ -617,13 +593,7 @@ export default function APIScanner() {
                     >
                       {ep.method}
                     </span>
-                    <span
-                      style={{
-                        color: "#ccc",
-                        fontFamily: "monospace",
-                        flex: 1,
-                      }}
-                    >
+                    <span style={{ color: "#ccc", fontFamily: "monospace", flex: 1 }}>
                       {ep.path}
                     </span>
                     {ep.requiresAuth && (

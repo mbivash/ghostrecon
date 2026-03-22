@@ -1070,65 +1070,6 @@ async function testSQLi(form) {
 }
 
 // ── Blind SQLi ────────────────────────────────────────
-async function testBlindSQLi(form) {
-  const findings = [];
-  for (const { payload, delay, db } of BLIND_SQLI_PAYLOADS.slice(0, 3)) {
-    try {
-      const formData = {};
-      form.inputs.forEach((i) => {
-        formData[i.name] = payload;
-      });
-      const start = Date.now();
-      if (form.method === "post") {
-        await axiosInstance.post(form.action, formData, {
-          timeout: delay + 8000,
-        });
-      } else {
-        const testUrl = new URL(form.action);
-        form.inputs.forEach((i) => testUrl.searchParams.set(i.name, payload));
-        await axiosInstance.get(testUrl.href, { timeout: delay + 8000 });
-      }
-      const elapsed = Date.now() - start;
-      if (elapsed >= delay - 500) {
-        findings.push({
-          type: "Blind SQL Injection (Time-Based)",
-          severity: "Critical",
-          owasp: "A03:2021 - Injection",
-          parameter: form.inputs.map((i) => i.name).join(", "),
-          endpoint: form.action,
-          method: form.method.toUpperCase(),
-          payload,
-          detail: `Time-based blind SQLi on ${db}. Server delayed ${Math.round(elapsed / 1000)}s. Attacker extracts full database silently.`,
-          evidence: `Payload caused ${Math.round(elapsed / 1000)}s delay — ${db}`,
-          remediation:
-            "Use parameterized queries immediately. Critical vulnerability.",
-        });
-        break;
-      }
-    } catch (e) {
-      if (
-        e.code === "ECONNABORTED" ||
-        (e.message && e.message.includes("timeout"))
-      ) {
-        findings.push({
-          type: "Possible Blind SQLi (Timeout)",
-          severity: "High",
-          owasp: "A03:2021 - Injection",
-          parameter: form.inputs.map((i) => i.name).join(", "),
-          endpoint: form.action,
-          method: form.method.toUpperCase(),
-          payload,
-          detail:
-            "Request timed out after SQL sleep payload. Possible blind SQLi. Manual verification needed.",
-          evidence: `Timeout after "${payload}"`,
-          remediation: "Manually verify. Use parameterized queries.",
-        });
-        break;
-      }
-    }
-  }
-  return findings;
-}
 
 // ── IDOR Detection ────────────────────────────────────
 async function testIDOR(urls, authedInstance, baseUrl) {
