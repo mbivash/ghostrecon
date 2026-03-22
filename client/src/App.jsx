@@ -15,6 +15,7 @@ import ScheduledScans from "./pages/ScheduledScans";
 import Settings from "./pages/Settings";
 import EmailSecurity from "./pages/EmailSecurity";
 import AuthenticatedScanner from "./pages/AuthenticatedScanner";
+import APIScanner from "./pages/APIScanner";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -36,6 +37,16 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route
+          path="/apiscan"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <APIScanner />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/authscan"
           element={
