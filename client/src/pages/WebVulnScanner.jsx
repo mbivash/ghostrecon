@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import api from "../utils/api";
 
 const SEVERITY_STYLES = {
@@ -6,7 +6,48 @@ const SEVERITY_STYLES = {
   High: { bg: "#1a0a0a", color: "#E24B4A", border: "#791F1F" },
   Medium: { bg: "#1a1200", color: "#BA7517", border: "#633806" },
   Low: { bg: "#0a1400", color: "#639922", border: "#27500A" },
+  Info: { bg: "#0d0d2e", color: "#7F77DD", border: "#3C3489" },
 };
+
+const CONFIDENCE_STYLES = {
+  Confirmed: { color: "#1D9E75", bg: "#0a1a14", border: "#0F6E56" },
+  Probable: { color: "#BA7517", bg: "#1a1200", border: "#633806" },
+  Possible: { color: "#555", bg: "#111", border: "#222" },
+};
+
+const PHASE_LABELS = {
+  init: "Initializing",
+  headers: "Security Headers",
+  files: "Sensitive Files",
+  redirect: "Open Redirect",
+  cors: "CORS Check",
+  clickjack: "Clickjacking",
+  crawl: "Page Crawler",
+  domxss: "DOM XSS",
+  csrf: "CSRF Check",
+  auth: "Broken Auth",
+  jwt: "JWT Security",
+  ssrf: "SSRF Test",
+  lfi: "LFI / Traversal",
+  xss: "XSS Payloads",
+  sqli: "SQL Injection",
+  ssti: "SSTI",
+  proto: "Prototype Pollution",
+  secrets: "Secret Scanner",
+  tech: "Tech Fingerprint",
+  smuggling: "HTTP Smuggling",
+  oob: "OOB Detection",
+  stored_xss: "Stored XSS",
+  xxe: "XXE Injection",
+  finalize: "Finalizing",
+  done: "Complete",
+};
+
+function generateSessionId() {
+  return (
+    "gr-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+  );
+}
 
 export default function WebVulnScanner() {
   const [target, setTarget] = useState("");
@@ -14,8 +55,19 @@ export default function WebVulnScanner() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState("");
-  const [loadingMsg, setLoadingMsg] = useState("");
   const [activeTab, setActiveTab] = useState("all");
+  const [logs, setLogs] = useState([]);
+  const [progress, setProgress] = useState(0);
+  const [currentPhase, setCurrentPhase] = useState("");
+  const [liveFindings, setLiveFindings] = useState([]);
+
+  const logsEndRef = useRef(null);
+  const sseRef = useRef(null);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+  useEffect(() => () => sseRef.current?.close(), []);
 
   const handleScan = async () => {
     if (!consent) return setError("You must check the authorization box.");
@@ -24,29 +76,48 @@ export default function WebVulnScanner() {
     setLoading(true);
     setError("");
     setResults(null);
+    setLogs([]);
+    setProgress(0);
+    setCurrentPhase("init");
+    setLiveFindings([]);
 
-    const messages = [
-      "Fetching target page...",
-      "Checking security headers...",
-      "Checking cookie security...",
-      "Scanning for sensitive files...",
-      "Crawling pages and forms...",
-      "Testing for XSS vulnerabilities...",
-      "Testing for SQL injection...",
-      "Checking for open redirects...",
-      "Analyzing all findings...",
-    ];
-    let i = 0;
-    setLoadingMsg(messages[0]);
-    const interval = setInterval(() => {
-      i++;
-      if (i < messages.length) setLoadingMsg(messages[i]);
-    }, 8000);
+    const sessionId = generateSessionId();
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    const evtSource = new EventSource(
+      `${apiBase}/api/webvuln/scan/progress/${sessionId}`,
+    );
+    sseRef.current = evtSource;
+
+    evtSource.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.type === "log") {
+        setLogs((prev) => [
+          ...prev,
+          { msg: data.msg, phase: data.phase, ts: data.ts },
+        ]);
+        if (data.percent) setProgress(data.percent);
+        if (data.phase) setCurrentPhase(data.phase);
+      }
+      if (data.type === "finding") {
+        setLiveFindings((prev) => [data.finding, ...prev].slice(0, 20));
+      }
+      if (data.type === "complete") {
+        setProgress(100);
+        evtSource.close();
+      }
+      if (data.type === "error") {
+        setError(data.msg);
+        evtSource.close();
+        setLoading(false);
+      }
+    };
+    evtSource.onerror = () => evtSource.close();
 
     try {
       const res = await api.post("/api/webvuln/scan", {
         target: target.trim(),
         consent,
+        sessionId,
       });
       setResults(res.data.data);
       setActiveTab("all");
@@ -55,30 +126,33 @@ export default function WebVulnScanner() {
         err.response?.data?.error || "Scan failed. Is the server running?",
       );
     } finally {
-      clearInterval(interval);
+      evtSource.close();
       setLoading(false);
     }
   };
 
+  const confirmed =
+    results?.findings?.filter((f) => f.confidence === "Confirmed").length || 0;
   const filtered =
     results?.findings?.filter((f) => {
       if (activeTab === "all") return true;
+      if (activeTab === "confirmed") return f.confidence === "Confirmed";
       return f.severity.toLowerCase() === activeTab;
     }) || [];
 
   return (
-    <div style={{ padding: "32px", maxWidth: "1000px" }}>
+    <div style={{ padding: "32px", maxWidth: "1100px" }}>
       <div style={{ marginBottom: "28px" }}>
         <h1 style={{ fontSize: "22px", fontWeight: "500", color: "#e8e6f0" }}>
           Web Vulnerability Scanner
         </h1>
         <p style={{ fontSize: "13px", color: "#555", marginTop: "4px" }}>
-          Deep automated scan — XSS, SQLi, headers, cookies, sensitive files,
-          open redirects. OWASP mapped.
+          Deep automated scan — XSS, SQLi, SSRF, IDOR, secrets, headers, OWASP
+          Top 10. Real-time live results with confidence scoring.
         </p>
       </div>
 
-      {/* Form */}
+      {/* Input */}
       <div
         style={{
           background: "#131315",
@@ -102,14 +176,14 @@ export default function WebVulnScanner() {
             </label>
             <input
               type="text"
-              placeholder="e.g. http://testphp.vulnweb.com"
+              placeholder="e.g. https://uat-bugbounty.nonprod.syfe.com"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleScan()}
+              style={{ width: "100%", boxSizing: "border-box" }}
             />
             <div style={{ fontSize: "11px", color: "#444", marginTop: "4px" }}>
-              Free test target: http://testphp.vulnweb.com — intentionally
-              vulnerable site
+              Free test: http://testphp.vulnweb.com
             </div>
           </div>
 
@@ -136,7 +210,7 @@ export default function WebVulnScanner() {
             >
               I confirm I have{" "}
               <span style={{ color: "#a89ff5" }}>written authorization</span> to
-              test this website for vulnerabilities.
+              test this target.
             </span>
           </label>
 
@@ -166,36 +240,197 @@ export default function WebVulnScanner() {
         </div>
       </div>
 
-      {/* Loading */}
+      {/* Live scan panel */}
       {loading && (
         <div
           style={{
-            background: "#131315",
-            border: "0.5px solid #1e1e22",
-            borderRadius: "12px",
-            padding: "32px",
-            textAlign: "center",
+            display: "grid",
+            gridTemplateColumns: "1fr 340px",
+            gap: "16px",
+            marginBottom: "24px",
           }}
         >
+          {/* Live log */}
           <div
             style={{
-              width: "32px",
-              height: "32px",
-              border: "2px solid #1e1e22",
-              borderTop: "2px solid #7F77DD",
-              borderRadius: "50%",
-              animation: "spin 0.8s linear infinite",
-              margin: "0 auto 16px",
+              background: "#0d0d0f",
+              border: "0.5px solid #1e1e22",
+              borderRadius: "12px",
+              overflow: "hidden",
             }}
-          />
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-          <div
-            style={{ color: "#a89ff5", fontSize: "14px", marginBottom: "6px" }}
           >
-            {loadingMsg}
+            <div
+              style={{
+                padding: "14px 18px",
+                borderBottom: "0.5px solid #1e1e22",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: "8px",
+                }}
+              >
+                <span style={{ fontSize: "12px", color: "#666" }}>
+                  {PHASE_LABELS[currentPhase] || "Scanning..."}
+                </span>
+                <span style={{ fontSize: "12px", color: "#7F77DD" }}>
+                  {progress}%
+                </span>
+              </div>
+              <div
+                style={{
+                  height: "4px",
+                  background: "#1e1e22",
+                  borderRadius: "2px",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    borderRadius: "2px",
+                    background: "linear-gradient(90deg,#534AB7,#7F77DD)",
+                    width: `${progress}%`,
+                    transition: "width 0.4s ease",
+                  }}
+                />
+              </div>
+            </div>
+            <div
+              style={{
+                height: "280px",
+                overflowY: "auto",
+                padding: "12px 18px",
+                fontFamily: "monospace",
+                fontSize: "12px",
+              }}
+            >
+              {logs.map((log, i) => (
+                <div
+                  key={i}
+                  style={{ display: "flex", gap: "10px", marginBottom: "4px" }}
+                >
+                  <span style={{ color: "#333", flexShrink: 0 }}>
+                    {log.ts
+                      ? new Date(log.ts).toLocaleTimeString([], {
+                          hour12: false,
+                        })
+                      : ""}
+                  </span>
+                  <span
+                    style={{
+                      color: i === logs.length - 1 ? "#a89ff5" : "#555",
+                    }}
+                  >
+                    {log.msg}
+                  </span>
+                </div>
+              ))}
+              <div ref={logsEndRef} />
+            </div>
           </div>
-          <div style={{ color: "#444", fontSize: "12px" }}>
-            Deep scan — may take 1–3 minutes
+
+          {/* Live findings ticker */}
+          <div
+            style={{
+              background: "#0d0d0f",
+              border: "0.5px solid #1e1e22",
+              borderRadius: "12px",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 18px",
+                borderBottom: "0.5px solid #1e1e22",
+                fontSize: "12px",
+                color: "#555",
+              }}
+            >
+              Live findings
+            </div>
+            <div style={{ height: "312px", overflowY: "auto", padding: "8px" }}>
+              {liveFindings.length === 0 ? (
+                <div
+                  style={{
+                    padding: "20px",
+                    textAlign: "center",
+                    color: "#333",
+                    fontSize: "12px",
+                  }}
+                >
+                  Findings will appear here...
+                </div>
+              ) : (
+                liveFindings.map((f, i) => {
+                  const s = SEVERITY_STYLES[f.severity] || SEVERITY_STYLES.Low;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        padding: "8px 10px",
+                        marginBottom: "4px",
+                        background: "#111",
+                        borderRadius: "8px",
+                        borderLeft: `2px solid ${s.border}`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          marginBottom: "3px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            padding: "1px 6px",
+                            borderRadius: "8px",
+                            background: s.bg,
+                            color: s.color,
+                          }}
+                        >
+                          {f.severity}
+                        </span>
+                        {f.confidence === "Confirmed" && (
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              padding: "1px 6px",
+                              borderRadius: "8px",
+                              background: "#0a1a14",
+                              color: "#1D9E75",
+                            }}
+                          >
+                            Confirmed
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#888" }}>
+                        {f.type}
+                      </div>
+                      {f.endpoint && (
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "#444",
+                            fontFamily: "monospace",
+                            marginTop: "2px",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {f.endpoint}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -207,7 +442,7 @@ export default function WebVulnScanner() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(8, 1fr)",
+              gridTemplateColumns: "repeat(8,1fr)",
               gap: "10px",
             }}
           >
@@ -234,18 +469,10 @@ export default function WebVulnScanner() {
                 color: "#BA7517",
               },
               { label: "Low", val: results.summary.low, color: "#639922" },
+              { label: "Confirmed", val: confirmed, color: "#1D9E75" },
+              { label: "Pages", val: results.pagesScanned, color: "#7F77DD" },
               {
-                label: "Pages scanned",
-                val: results.pagesScanned,
-                color: "#7F77DD",
-              },
-              {
-                label: "Technologies",
-                val: results.technologies?.length || 0,
-                color: "#a89ff5",
-              },
-              {
-                label: "Secrets found",
+                label: "Secrets",
                 val: results.secretsFound?.length || 0,
                 color: results.secretsFound?.length > 0 ? "#ff4444" : "#1D9E75",
               },
@@ -287,10 +514,12 @@ export default function WebVulnScanner() {
               borderRadius: "10px",
               border: "0.5px solid #1e1e22",
               width: "fit-content",
+              flexWrap: "wrap",
             }}
           >
             {[
               { label: `All (${results.summary.total})`, val: "all" },
+              { label: `Confirmed (${confirmed})`, val: "confirmed" },
               {
                 label: `Critical (${results.summary.critical})`,
                 val: "critical",
@@ -338,7 +567,6 @@ export default function WebVulnScanner() {
             >
               {filtered.length} findings
             </div>
-
             {filtered.length === 0 ? (
               <div
                 style={{
@@ -353,6 +581,8 @@ export default function WebVulnScanner() {
             ) : (
               filtered.map((v, i) => {
                 const s = SEVERITY_STYLES[v.severity] || SEVERITY_STYLES.Low;
+                const c =
+                  CONFIDENCE_STYLES[v.confidence] || CONFIDENCE_STYLES.Possible;
                 return (
                   <div
                     key={i}
@@ -364,12 +594,11 @@ export default function WebVulnScanner() {
                           : "none",
                     }}
                   >
-                    {/* Header */}
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: "10px",
+                        gap: "8px",
                         marginBottom: "8px",
                         flexWrap: "wrap",
                       }}
@@ -386,6 +615,20 @@ export default function WebVulnScanner() {
                       >
                         {v.severity}
                       </span>
+                      {v.confidence && (
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            padding: "2px 8px",
+                            borderRadius: "10px",
+                            background: c.bg,
+                            color: c.color,
+                            border: `0.5px solid ${c.border}`,
+                          }}
+                        >
+                          {v.confidence}
+                        </span>
+                      )}
                       <span
                         style={{
                           fontSize: "14px",
@@ -410,8 +653,6 @@ export default function WebVulnScanner() {
                         </span>
                       )}
                     </div>
-
-                    {/* Detail */}
                     <div
                       style={{
                         fontSize: "13px",
@@ -422,8 +663,6 @@ export default function WebVulnScanner() {
                     >
                       {v.detail}
                     </div>
-
-                    {/* Evidence */}
                     {v.evidence && (
                       <div
                         style={{
@@ -439,8 +678,6 @@ export default function WebVulnScanner() {
                         {v.evidence}
                       </div>
                     )}
-
-                    {/* Endpoint */}
                     {v.endpoint && (
                       <div
                         style={{
@@ -466,8 +703,6 @@ export default function WebVulnScanner() {
                         )}
                       </div>
                     )}
-
-                    {/* Remediation */}
                     {v.remediation && (
                       <div
                         style={{

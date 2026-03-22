@@ -2,6 +2,14 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const { testBlindSSRF, testBlindXSS, testBlindSQLi } = require("./oobDetector");
+const {
+  validateSensitiveFile,
+  validateSecret,
+  validateOpenRedirect,
+  validateXSSReflection,
+  addConfidenceToFindings,
+  filterFalsePositives,
+} = require("./validator");
 
 const {
   testAdvancedXSS,
@@ -907,28 +915,75 @@ async function checkSensitiveFiles(baseUrl) {
     { path: "/admin", name: "Admin panel exposed", critical: false },
     { path: "/administrator", name: "Admin panel exposed", critical: false },
     { path: "/.htaccess", name: "Apache config exposed", critical: false },
-    { path: "/backup.zip", name: "Backup file exposed", critical: true },
-    { path: "/database.sql", name: "Database dump exposed", critical: true },
+    {
+      path: "/backup.zip",
+      name: "Backup file exposed",
+      critical: true,
+      validate: true,
+    },
+    {
+      path: "/database.sql",
+      name: "Database dump exposed",
+      critical: true,
+      validate: true,
+    },
     { path: "/.DS_Store", name: "DS_Store file exposed", critical: false },
-    { path: "/web.config", name: "IIS config exposed", critical: true },
+    {
+      path: "/web.config",
+      name: "IIS config exposed",
+      critical: true,
+      validate: true,
+    },
     {
       path: "/server-status",
       name: "Apache server status exposed",
       critical: false,
     },
-    {
-      path: "/.well-known/security.txt",
-      name: "Security.txt found",
-      critical: false,
-    },
   ];
+
   for (const file of files) {
     try {
-      const res = await axiosInstance.get(new URL(file.path, baseUrl).href);
-      if (res.status === 200) {
+      const fileUrl = new URL(file.path, baseUrl).href;
+      const res = await axiosInstance.get(fileUrl);
+
+      if (res.status !== 200) continue;
+
+      // Content-type check — if HTML, it's a fake/WAF intercept page
+      const contentType = (res.headers["content-type"] || "").toLowerCase();
+      if (contentType.includes("text/html") && file.validate) {
+        // Don't flag as critical — validate the actual content
+        const validation = await validateSensitiveFile(fileUrl, file.path);
+        if (!validation.valid) continue; // False positive — skip
+        findings.push({
+          type: file.name,
+          severity: "Critical",
+          confidence: validation.confidence,
+          owasp: "A05:2021 - Security Misconfiguration",
+          detail: `${file.name} is publicly accessible. ${validation.reason}`,
+          evidence: `GET ${file.path} → HTTP 200 | ${validation.reason}`,
+          remediation: `Restrict access to ${file.path} via server config.`,
+        });
+        continue;
+      }
+
+      // For files requiring validation, run the validator
+      if (file.validate) {
+        const validation = await validateSensitiveFile(fileUrl, file.path);
+        if (!validation.valid) continue; // False positive — skip
+        findings.push({
+          type: file.name,
+          severity: "Critical",
+          confidence: validation.confidence,
+          owasp: "A05:2021 - Security Misconfiguration",
+          detail: `${file.name} CONFIRMED accessible. ${validation.reason}`,
+          evidence: `GET ${file.path} → HTTP 200 (${validation.size || "?"} bytes) | ${validation.reason}`,
+          remediation: `URGENT: Restrict access to ${file.path} via server config.`,
+        });
+      } else {
         findings.push({
           type: file.name,
           severity: file.critical ? "Critical" : "Low",
+          confidence: "Probable",
           owasp: "A05:2021 - Security Misconfiguration",
           detail: `${file.name} is publicly accessible. May expose credentials or source code.`,
           evidence: `GET ${file.path} → HTTP 200`,
@@ -952,6 +1007,8 @@ async function checkOpenRedirect(targetUrl) {
     "goto",
     "dest",
   ];
+  const targetDomain = new URL(targetUrl).hostname;
+
   for (const param of params) {
     try {
       const testUrl = new URL(targetUrl);
@@ -961,17 +1018,19 @@ async function checkOpenRedirect(targetUrl) {
       });
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers["location"] || "";
-        if (location.includes("evil.com")) {
-          findings.push({
-            type: "Open Redirect",
-            severity: "Medium",
-            owasp: "A01:2021 - Broken Access Control",
-            detail: `Open redirect via "${param}". Attackers redirect users to phishing sites.`,
-            evidence: `${param}=https://evil.com → Location: ${location}`,
-            remediation: "Validate redirects against whitelist.",
-          });
-          break;
-        }
+        const validation = validateOpenRedirect(location, targetDomain);
+        if (!validation.valid) continue; // Redirect stays on same domain — not a bug
+
+        findings.push({
+          type: "Open Redirect",
+          severity: "Medium",
+          confidence: validation.confidence,
+          owasp: "A01:2021 - Broken Access Control",
+          detail: `Open redirect via "${param}". Attackers can redirect users to phishing sites.`,
+          evidence: `${param}=https://evil.com → Location: ${location}`,
+          remediation: "Validate redirects against strict whitelist.",
+        });
+        break;
       }
     } catch (e) {}
   }
@@ -1585,6 +1644,30 @@ async function deepScan(targetUrl) {
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
+
+      // Filter known false positives (security.txt, bare WAF detected, etc.)
+      results.findings = filterFalsePositives(results.findings);
+
+      // Add confidence score to every finding
+      results.findings = addConfidenceToFindings(results.findings);
+
+      // Sort: Confirmed first, then Probable, then Possible; within each by severity
+      const confidenceOrder = { Confirmed: 0, Probable: 1, Possible: 2 };
+      const severityOrder = {
+        Critical: 0,
+        High: 1,
+        Medium: 2,
+        Low: 3,
+        Info: 4,
+      };
+      results.findings.sort((a, b) => {
+        const cA = confidenceOrder[a.confidence] ?? 3;
+        const cB = confidenceOrder[b.confidence] ?? 3;
+        if (cA !== cB) return cA - cB;
+        return (
+          (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5)
+        );
+      });
     });
 
     results.summary = {

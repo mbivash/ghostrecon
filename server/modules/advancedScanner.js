@@ -1,3 +1,4 @@
+const { validateSecret, CONFIDENCE } = require("./validator");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const {
@@ -364,23 +365,74 @@ async function scanForSecrets(targetUrl, baseUrl, html) {
 
   for (const { name, pattern, severity } of SECRET_PATTERNS) {
     const matches = [...combinedContent.matchAll(pattern)];
-    if (matches.length > 0) {
-      const match = matches[0][0];
-      const masked =
-        match.substring(0, 8) + "..." + match.substring(match.length - 4);
+    if (matches.length === 0) continue;
 
-      secretsFound.push({ name, match: masked, severity });
+    const match = matches[0][0];
+    const masked =
+      match.substring(0, 8) + "..." + match.substring(match.length - 4);
 
-      findings.push({
-        type: `Secret Exposed: ${name}`,
-        severity,
-        owasp: "A02:2021 - Cryptographic Failures",
-        endpoint: targetUrl,
-        detail: `${name} found in page source or JavaScript files. This credential may allow attackers to access your cloud services, databases or third-party APIs.`,
-        evidence: `Pattern matched: ${masked} (${matches.length} occurrence${matches.length > 1 ? "s" : ""})`,
-        remediation: `Immediately rotate/revoke this ${name}. Never hardcode secrets in frontend code. Use environment variables on the server. Remove from git history using git-filter-repo.`,
-      });
+    // Skip obvious false positives — variable names, not real secrets
+    const falsePositivePatterns = [
+      /password[_-]?field/i,
+      /password[_-]?input/i,
+      /update[_-]?password/i,
+      /reset[_-]?password/i,
+      /confirm[_-]?password/i,
+      /old[_-]?password/i,
+      /new[_-]?password/i,
+      /password[_-]?placeholder/i,
+      /example|sample|dummy|test|fake|mock|placeholder/i,
+    ];
+
+    const context = combinedContent.substring(
+      Math.max(0, combinedContent.indexOf(match) - 30),
+      combinedContent.indexOf(match) + match.length + 30,
+    );
+
+    if (falsePositivePatterns.some((p) => p.test(context))) continue;
+
+    // Try to validate the secret is actually live
+    const validation = await validateSecret(name, match);
+
+    // Upgrade severity if confirmed live, downgrade to Possible if can't validate
+    let finalSeverity = severity;
+    let confidence = CONFIDENCE.POSSIBLE;
+    let validationNote = "";
+
+    if (validation.valid === true) {
+      finalSeverity = "Critical"; // Always critical if confirmed live
+      confidence = CONFIDENCE.CONFIRMED;
+      validationNote = ` LIVE KEY CONFIRMED: ${validation.message}`;
+    } else if (validation.valid === false) {
+      finalSeverity = "Low"; // Inactive/revoked key — low priority
+      confidence = CONFIDENCE.CONFIRMED;
+      validationNote = ` Key appears inactive: ${validation.message}`;
+    } else {
+      // Can't auto-validate — keep original severity but mark as Possible
+      confidence = CONFIDENCE.POSSIBLE;
+      validationNote = ` ${validation.message}`;
     }
+
+    secretsFound.push({
+      name,
+      match: masked,
+      severity: finalSeverity,
+      confidence,
+    });
+
+    findings.push({
+      type: `Secret Exposed: ${name}`,
+      severity: finalSeverity,
+      confidence,
+      owasp: "A02:2021 - Cryptographic Failures",
+      endpoint: targetUrl,
+      detail: `${name} found in page source or JavaScript files.${validationNote}`,
+      evidence: `Pattern matched: ${masked} (${matches.length} occurrence${matches.length > 1 ? "s" : ""})`,
+      remediation:
+        validation.valid === true
+          ? `URGENT: Immediately rotate/revoke this ${name} — it is currently active and exploitable.`
+          : `Rotate/revoke this ${name}. Never hardcode secrets in frontend code. Use environment variables. Remove from git history using git-filter-repo.`,
+    });
   }
 
   return { findings, secretsFound };
