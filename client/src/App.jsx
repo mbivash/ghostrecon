@@ -20,6 +20,7 @@ import Compliance from "./pages/Compliance";
 import Landing from "./pages/Landing";
 import WordPressScanner from "./pages/WordPressScanner";
 import S3Scanner from "./pages/S3Scanner";
+import DNSCheck from "./pages/DNSCheck";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -41,6 +42,16 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route
+          path="/dnscheck"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <DNSCheck />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/s3scan"
           element={
