@@ -29,6 +29,7 @@ const nav = [
       { label: "Scheduled scans", path: "/schedules" },
       { label: "Report generator", path: "/reports" },
       { label: "Scan history", path: "/history" },
+      { label: "Compliance", path: "/compliance" },
     ],
   },
   {

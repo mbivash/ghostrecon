@@ -16,6 +16,7 @@ import Settings from "./pages/Settings";
 import EmailSecurity from "./pages/EmailSecurity";
 import AuthenticatedScanner from "./pages/AuthenticatedScanner";
 import APIScanner from "./pages/APIScanner";
+import Compliance from "./pages/Compliance";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("gr_token");
@@ -63,6 +64,16 @@ export default function App() {
             <ProtectedRoute>
               <Layout>
                 <EmailSecurity />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/compliance"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Compliance />
               </Layout>
             </ProtectedRoute>
           }
