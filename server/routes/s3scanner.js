@@ -1,241 +1,203 @@
 const express = require("express");
 const router = express.Router();
-const https = require("https");
-const http = require("http");
+const axios = require("axios");
+const cheerio = require("cheerio");
 const { scansDb } = require("../database");
 
-const axiosLike = (url, method = "GET") => {
-  return new Promise((resolve) => {
-    const proto = url.startsWith("https") ? https : http;
-    const req = proto.request(
-      url,
-      {
-        method,
-        timeout: 10000,
-        headers: { "User-Agent": "GhostRecon S3 Scanner" },
-      },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () =>
-          resolve({ status: res.statusCode, body: data, headers: res.headers }),
-        );
-      },
-    );
-    req.on("error", () => resolve(null));
-    req.on("timeout", () => {
-      req.destroy();
-      resolve(null);
+const axiosInstance = axios.create({
+  timeout: 15000,
+  validateStatus: () => true,
+  headers: {
+    "User-Agent": "Mozilla/5.0 (compatible; GhostRecon S3 Scanner)",
+    Accept: "text/html,application/json,*/*",
+  },
+});
+
+const S3_PATTERNS = [
+  /https?:\/\/([a-z0-9][a-z0-9\-]{2,62})\.s3\.amazonaws\.com/gi,
+  /https?:\/\/s3\.amazonaws\.com\/([a-z0-9][a-z0-9\-]{2,62})/gi,
+  /https?:\/\/([a-z0-9][a-z0-9\-]{2,62})\.s3\.[a-z0-9\-]+\.amazonaws\.com/gi,
+  /https?:\/\/([a-z0-9][a-z0-9\-]{2,62})\.s3-website[a-z0-9\-\.]+\.amazonaws\.com/gi,
+];
+
+async function crawlForS3URLs(targetUrl, baseUrl) {
+  const foundBuckets = new Set();
+
+  // Fetch main page
+  let html = "";
+  try {
+    const res = await axiosInstance.get(targetUrl);
+    html = typeof res.data === "string" ? res.data : "";
+  } catch (e) {
+    throw new Error("Could not reach target: " + e.message);
+  }
+
+  // Extract S3 URLs from main page
+  for (const pattern of S3_PATTERNS) {
+    const matches = [...html.matchAll(pattern)];
+    matches.forEach((m) => {
+      if (m[1]) foundBuckets.add(m[1]);
     });
-    req.end();
+  }
+
+  // Find and fetch JS files
+  const $ = cheerio.load(html);
+  const jsUrls = [];
+  $("script[src]").each((i, el) => {
+    const src = $(el).attr("src");
+    if (!src) return;
+    try {
+      const absolute = new URL(src, baseUrl).href;
+      jsUrls.push(absolute);
+    } catch (e) {}
   });
-};
 
-function generateBucketNames(domain) {
-  const base = domain
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "")
-    .replace(/\./g, "-")
-    .toLowerCase();
-  const company = base.split("-")[0];
+  // Fetch JS files and extract S3 URLs
+  for (const jsUrl of jsUrls.slice(0, 8)) {
+    try {
+      const res = await axiosInstance.get(jsUrl);
+      const content = typeof res.data === "string" ? res.data : "";
+      for (const pattern of S3_PATTERNS) {
+        const matches = [...content.matchAll(pattern)];
+        matches.forEach((m) => {
+          if (m[1]) foundBuckets.add(m[1]);
+        });
+      }
+    } catch (e) {}
+  }
 
+  // Also check page source comments and data attributes
+  const inlinePatterns = [
+    /["']([a-z0-9][a-z0-9\-]{2,62})\.s3\.amazonaws\.com["']/gi,
+    /bucket['":\s]+['"]([a-z0-9][a-z0-9\-]{2,62})['"]/gi,
+    /s3_bucket['":\s]+['"]([a-z0-9][a-z0-9\-]{2,62})['"]/gi,
+    /AWS_BUCKET['":\s]+['"]([a-z0-9][a-z0-9\-]{2,62})['"]/gi,
+  ];
+
+  for (const pattern of inlinePatterns) {
+    const matches = [...html.matchAll(pattern)];
+    matches.forEach((m) => {
+      if (m[1] && m[1].length > 3) foundBuckets.add(m[1]);
+    });
+  }
+
+  return { foundBuckets: [...foundBuckets], html, jsCount: jsUrls.length };
+}
+
+function generatePossibleBuckets(domain) {
+  const company = domain
+    .split(".")[0]
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
   const names = new Set([
-    base,
-    company,
+    `${company}`,
     `${company}-assets`,
     `${company}-static`,
     `${company}-media`,
     `${company}-uploads`,
     `${company}-files`,
+    `${company}-images`,
+    `${company}-cdn`,
     `${company}-backup`,
     `${company}-backups`,
     `${company}-data`,
     `${company}-dev`,
     `${company}-staging`,
     `${company}-prod`,
-    `${company}-production`,
     `${company}-public`,
-    `${company}-private`,
-    `${company}-images`,
-    `${company}-img`,
-    `${company}-videos`,
-    `${company}-docs`,
-    `${company}-documents`,
-    `${company}-logs`,
-    `${company}-database`,
-    `${company}-db`,
-    `${company}-api`,
-    `${company}-web`,
-    `${company}-website`,
-    `${company}-cdn`,
     `${company}-storage`,
-    `${company}-bucket`,
-    `${base}-assets`,
-    `${base}-backup`,
-    `${base}-media`,
-    `${base}-static`,
-    `${base}-uploads`,
   ]);
-
-  return [...names].slice(0, 35);
+  return [...names];
 }
 
-async function checkS3Bucket(bucketName) {
-  const result = {
-    name: bucketName,
-    exists: false,
-    publicRead: false,
-    publicWrite: false,
-    publicList: false,
-    websiteEnabled: false,
-    findings: [],
-  };
+async function testBucket(bucketName, isConfirmed) {
+  const findings = [];
+  const bucketUrl = `https://${bucketName}.s3.amazonaws.com/`;
+  const label = isConfirmed ? "(Confirmed)" : "(Possible — verify ownership)";
 
-  const regions = ["s3", "s3.ap-south-1", "s3.us-east-1", "s3.eu-west-1"];
+  try {
+    const res = await axiosInstance.get(bucketUrl);
 
-  for (const region of regions) {
-    const bucketUrl =
-      region === "s3"
-        ? `https://${bucketName}.s3.amazonaws.com/`
-        : `https://${bucketName}.${region}.amazonaws.com/`;
+    if (!res) return findings;
 
-    try {
-      const res = await axiosLike(bucketUrl, "GET");
-      if (!res) continue;
+    if (res.status === 200) {
+      const body =
+        typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+      const isListing =
+        body.includes("<ListBucketResult") || body.includes("<Contents>");
 
-      if (res.status === 404 && res.body.includes("NoSuchBucket")) continue;
-      if (res.status === 403 || res.status === 200 || res.status === 400) {
-        result.exists = true;
+      if (isListing) {
+        const fileMatches = body.match(/<Key>([^<]+)<\/Key>/g) || [];
+        const files = fileMatches
+          .slice(0, 5)
+          .map((m) => m.replace(/<\/?Key>/g, ""));
 
-        if (res.status === 200) {
-          const body = res.body;
-
-          if (
-            body.includes("<ListBucketResult") ||
-            body.includes("<Contents>")
-          ) {
-            result.publicList = true;
-            result.publicRead = true;
-
-            const fileMatches = body.match(/<Key>([^<]+)<\/Key>/g) || [];
-            const files = fileMatches
-              .slice(0, 5)
-              .map((m) => m.replace(/<\/?Key>/g, ""));
-
-            result.findings.push({
-              type: "S3 Bucket Publicly Listable",
-              severity: "Critical",
-              owasp: "A01:2021 - Broken Access Control",
-              bucket: bucketName,
-              url: bucketUrl,
-              detail: `S3 bucket "${bucketName}" is publicly accessible and allows directory listing. Anyone can see all files stored in this bucket. ${files.length > 0 ? `Files found: ${files.join(", ")}` : ""}`,
-              evidence: `GET ${bucketUrl} returned HTTP 200 with bucket listing`,
-              remediation:
-                "Immediately set bucket ACL to private. Remove any public access grants. Enable S3 Block Public Access settings. Review all files in the bucket for sensitive data.",
-            });
-          }
-        }
-
-        if (res.status === 403) {
-          result.findings.push({
-            type: "S3 Bucket Exists — Access Restricted",
-            severity: "Low",
-            owasp: "A05:2021 - Security Misconfiguration",
-            bucket: bucketName,
-            url: bucketUrl,
-            detail: `S3 bucket "${bucketName}" exists but access is restricted. While not immediately exploitable, bucket existence confirms AWS infrastructure.`,
-            evidence: `GET ${bucketUrl} returned HTTP 403 Forbidden`,
-            remediation:
-              "Verify bucket permissions are correctly configured. Ensure no unintended public access exists.",
-          });
-        }
+        findings.push({
+          type: `S3 Bucket Publicly Listable ${label}`,
+          severity: isConfirmed ? "Critical" : "Medium",
+          owasp: "A01:2021 - Broken Access Control",
+          endpoint: bucketUrl,
+          confirmed: isConfirmed,
+          detail: isConfirmed
+            ? `S3 bucket "${bucketName}" was found in the site source code and is publicly listable. Anyone can see and download all files. ${files.length > 0 ? `Files found: ${files.join(", ")}` : ""}`
+            : `S3 bucket "${bucketName}" matches naming patterns for this domain and is publicly listable. Verify if this bucket belongs to your organization. ${files.length > 0 ? `Files found: ${files.join(", ")}` : ""}`,
+          evidence: `GET ${bucketUrl} returned HTTP 200 with file listing${isConfirmed ? " — URL found in site source" : " — pattern-based detection"}`,
+          remediation:
+            "Enable S3 Block Public Access immediately. Set bucket ACL to private. Audit all files for sensitive data exposure.",
+        });
 
         // Test write access
-        const writeRes = await axiosLike(
-          `${bucketUrl}ghostrecon-test-${Date.now()}.txt`,
-          "PUT",
-        );
-        if (writeRes && writeRes.status === 200) {
-          result.publicWrite = true;
-          result.findings.push({
-            type: "S3 Bucket Publicly Writable",
-            severity: "Critical",
-            owasp: "A01:2021 - Broken Access Control",
-            bucket: bucketName,
-            url: bucketUrl,
-            detail: `S3 bucket "${bucketName}" allows public write access. Attackers can upload malicious files, deface your website, or use your bucket for phishing attacks.`,
-            evidence: `PUT ${bucketUrl}test.txt returned HTTP 200`,
-            remediation:
-              "Immediately remove public write permissions. Set bucket policy to deny all public access. Review AWS IAM permissions.",
+        try {
+          const writeRes = await axiosInstance.request({
+            method: "PUT",
+            url: `${bucketUrl}ghostrecon-test-${Date.now()}.txt`,
+            data: "GhostRecon security test",
+            timeout: 8000,
+            validateStatus: () => true,
           });
-        }
-
-        // Check website hosting
-        const websiteUrl = `http://${bucketName}.s3-website.ap-south-1.amazonaws.com/`;
-        const websiteRes = await axiosLike(websiteUrl, "GET");
-        if (
-          websiteRes &&
-          websiteRes.status === 200 &&
-          !websiteRes.body.includes("NoSuchBucket")
-        ) {
-          result.websiteEnabled = true;
-          result.findings.push({
-            type: "S3 Static Website Hosting Enabled",
-            severity: "Medium",
-            owasp: "A05:2021 - Security Misconfiguration",
-            bucket: bucketName,
-            url: websiteUrl,
-            detail: `S3 bucket "${bucketName}" has static website hosting enabled. All files in the bucket may be publicly accessible via the website endpoint.`,
-            evidence: `GET ${websiteUrl} returned HTTP 200`,
-            remediation:
-              "Disable static website hosting if not needed. If needed, ensure only intended files are public.",
-          });
-        }
-
-        break;
-      }
-    } catch (e) {}
-  }
-
-  return result;
-}
-
-async function checkSubdomainBuckets(domain) {
-  const findings = [];
-  const subdomains = [
-    "assets",
-    "static",
-    "media",
-    "uploads",
-    "files",
-    "cdn",
-    "images",
-    "backup",
-  ];
-
-  for (const sub of subdomains) {
-    try {
-      const testUrl = `http://${sub}.${domain}/`;
-      const res = await axiosLike(testUrl, "GET");
-
-      if (
-        res &&
-        res.status === 200 &&
-        (res.headers["server"] || "").toLowerCase().includes("amazons3")
-      ) {
+          if (writeRes && writeRes.status === 200) {
+            findings.push({
+              type: `S3 Bucket Publicly Writable ${label}`,
+              severity: "Critical",
+              owasp: "A01:2021 - Broken Access Control",
+              endpoint: bucketUrl,
+              confirmed: isConfirmed,
+              detail: `S3 bucket "${bucketName}" allows public write access. Attackers can upload malware, ransomware or phishing pages.`,
+              evidence: `PUT ${bucketUrl} returned HTTP 200`,
+              remediation:
+                "Remove public write permissions immediately. Use IAM roles for write access only.",
+            });
+          }
+        } catch (e) {}
+      } else {
         findings.push({
-          type: "S3 Bucket Behind Subdomain",
-          severity: "Medium",
-          owasp: "A05:2021 - Security Misconfiguration",
-          url: testUrl,
-          detail: `Subdomain ${sub}.${domain} appears to be serving content from an S3 bucket. Verify the bucket is not publicly misconfigured.`,
-          evidence: `${testUrl} served by AmazonS3`,
+          type: `S3 Bucket Public Access ${label}`,
+          severity: isConfirmed ? "High" : "Low",
+          owasp: "A01:2021 - Broken Access Control",
+          endpoint: bucketUrl,
+          confirmed: isConfirmed,
+          detail: `S3 bucket "${bucketName}" returned HTTP 200. ${isConfirmed ? "Confirmed to belong to this site." : "Ownership unconfirmed."} Public access may be misconfigured.`,
+          evidence: `GET ${bucketUrl} returned HTTP 200`,
           remediation:
-            "Verify the S3 bucket behind this subdomain is properly secured with private ACL and Block Public Access enabled.",
+            "Review bucket permissions. Enable S3 Block Public Access.",
         });
       }
-    } catch (e) {}
-  }
+    } else if (res.status === 403) {
+      if (isConfirmed) {
+        findings.push({
+          type: "S3 Bucket Confirmed — Properly Secured",
+          severity: "Info",
+          owasp: "A01:2021 - Broken Access Control",
+          endpoint: bucketUrl,
+          confirmed: true,
+          detail: `S3 bucket "${bucketName}" was found in site source and is properly restricted (403). This is correct configuration.`,
+          evidence: `GET ${bucketUrl} returned HTTP 403 — bucket exists but is private`,
+          remediation:
+            "No action needed. Bucket is correctly configured as private.",
+        });
+      }
+    }
+  } catch (e) {}
 
   return findings;
 }
@@ -248,72 +210,90 @@ router.post("/scan", async (req, res) => {
   if (!target)
     return res.status(400).json({ error: "Target domain is required." });
 
-  let domain = target
-    .trim()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "")
-    .trim();
+  let targetUrl = target.trim();
+  if (!targetUrl.startsWith("http")) targetUrl = "http://" + targetUrl;
+  const domain = new URL(targetUrl).hostname;
 
   console.log("S3 scan for:", domain);
 
   try {
     const results = {
       domain,
-      bucketsChecked: 0,
-      bucketsFound: [],
-      vulnerableBuckets: [],
+      targetUrl,
+      confirmedBuckets: [],
+      possibleBuckets: [],
       findings: [],
+      jsFilesScanned: 0,
       scannedAt: new Date().toISOString(),
     };
 
-    const bucketNames = generateBucketNames(domain);
-    results.bucketsChecked = bucketNames.length;
-
-    console.log(`Checking ${bucketNames.length} bucket names...`);
-
-    // Check buckets in batches
-    const batchSize = 5;
-    for (let i = 0; i < bucketNames.length; i += batchSize) {
-      const batch = bucketNames.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map((name) => checkS3Bucket(name)),
-      );
-
-      batchResults.forEach((bucket) => {
-        if (bucket.exists) {
-          results.bucketsFound.push(bucket.name);
-          if (bucket.publicList || bucket.publicWrite || bucket.publicRead) {
-            results.vulnerableBuckets.push(bucket.name);
-          }
-          results.findings.push(...bucket.findings);
-        }
-      });
+    // Step 1 — Crawl site for real S3 URLs
+    console.log("Crawling site for S3 URLs...");
+    let crawlResult;
+    try {
+      crawlResult = await crawlForS3URLs(targetUrl, `https://${domain}`);
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
     }
 
-    // Check subdomain-based buckets
-    const subdomainFindings = await checkSubdomainBuckets(domain);
-    results.findings.push(...subdomainFindings);
+    results.confirmedBuckets = crawlResult.foundBuckets;
+    results.jsFilesScanned = crawlResult.jsCount;
+    console.log(
+      `Found ${crawlResult.foundBuckets.length} confirmed S3 buckets in source`,
+    );
 
-    if (results.bucketsFound.length === 0) {
+    // Step 2 — Test confirmed buckets
+    for (const bucketName of results.confirmedBuckets) {
+      console.log(`Testing confirmed bucket: ${bucketName}`);
+      const bucketFindings = await testBucket(bucketName, true);
+      results.findings.push(...bucketFindings);
+    }
+
+    // Step 3 — Generate and test possible buckets
+    const possibleNames = generatePossibleBuckets(domain);
+    results.possibleBuckets = possibleNames.filter(
+      (n) => !results.confirmedBuckets.includes(n),
+    );
+
+    console.log(
+      `Testing ${Math.min(results.possibleBuckets.length, 10)} possible buckets...`,
+    );
+    for (const bucketName of results.possibleBuckets.slice(0, 10)) {
+      const bucketFindings = await testBucket(bucketName, false);
+      results.findings.push(...bucketFindings);
+    }
+
+    // Step 4 — If nothing found at all
+    if (results.confirmedBuckets.length === 0) {
       results.findings.push({
-        type: "No S3 Buckets Found",
+        type: "No S3 Buckets Found in Site Source",
         severity: "Info",
-        detail: `No publicly accessible S3 buckets found for common naming patterns of "${domain}". This is a good sign — either no S3 buckets are used or they are properly secured.`,
-        evidence: `Checked ${bucketNames.length} common bucket name patterns`,
+        detail: `No S3 bucket URLs were found in the page source or ${results.jsFilesScanned} JavaScript file(s) of ${targetUrl}. Either this site does not use AWS S3, or bucket URLs are loaded dynamically after page load.`,
+        evidence: `Scanned main page + ${results.jsFilesScanned} JS files`,
         remediation:
-          "Continue monitoring for new S3 buckets. Use AWS Config rules to automatically detect public buckets.",
+          "No action needed. If you use S3, verify buckets have Block Public Access enabled in the AWS console.",
       });
     }
+
+    // Remove duplicates
+    const seen = new Set();
+    results.findings = results.findings.filter((f) => {
+      const key = `${f.type}-${f.endpoint}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
     results.summary = {
-      bucketsChecked: bucketNames.length,
-      bucketsFound: results.bucketsFound.length,
-      vulnerableBuckets: results.vulnerableBuckets.length,
+      confirmedBuckets: results.confirmedBuckets.length,
+      possibleBuckets: results.possibleBuckets.length,
+      jsFilesScanned: results.jsFilesScanned,
       critical: results.findings.filter((f) => f.severity === "Critical")
         .length,
       high: results.findings.filter((f) => f.severity === "High").length,
       medium: results.findings.filter((f) => f.severity === "Medium").length,
       low: results.findings.filter((f) => f.severity === "Low").length,
+      info: results.findings.filter((f) => f.severity === "Info").length,
       total: results.findings.length,
     };
 
@@ -332,7 +312,7 @@ router.post("/scan", async (req, res) => {
         userId: req.user?.id,
         target: domain,
         result: results,
-        findings_count: results.vulnerableBuckets.length,
+        findings_count: results.summary.critical + results.summary.high,
         severity,
         scanned_at: new Date().toISOString(),
       })

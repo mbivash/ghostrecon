@@ -8,6 +8,7 @@ export default function S3Scanner() {
   const [loadingMsg, setLoadingMsg] = useState("");
   const [results, setResults] = useState(null);
   const [error, setError] = useState("");
+  const [showPossible, setShowPossible] = useState(false);
 
   const handleScan = async () => {
     if (!consent) return setError("You must check the authorization box.");
@@ -17,11 +18,10 @@ export default function S3Scanner() {
     setResults(null);
 
     const messages = [
-      "Generating bucket name patterns...",
-      "Checking S3 buckets...",
-      "Testing read access...",
-      "Testing write access...",
-      "Checking subdomain buckets...",
+      "Crawling site for S3 URLs...",
+      "Scanning JavaScript files...",
+      "Testing confirmed S3 buckets...",
+      "Testing possible bucket names...",
       "Analyzing results...",
     ];
     let i = 0;
@@ -29,7 +29,7 @@ export default function S3Scanner() {
     const interval = setInterval(() => {
       i++;
       if (i < messages.length) setLoadingMsg(messages[i]);
-    }, 8000);
+    }, 6000);
 
     try {
       const res = await api.post("/api/s3scan/scan", {
@@ -57,6 +57,13 @@ export default function S3Scanner() {
     return { bg: "#0d0d2e", color: "#7F77DD", border: "#3C3489" };
   };
 
+  const confirmedFindings =
+    results?.findings?.filter((f) => f.confirmed === true) || [];
+  const possibleFindings =
+    results?.findings?.filter((f) => f.confirmed === false) || [];
+  const infoFindings =
+    results?.findings?.filter((f) => f.severity === "Info") || [];
+
   return (
     <div style={{ padding: "32px", maxWidth: "900px" }}>
       <div style={{ marginBottom: "28px" }}>
@@ -64,27 +71,47 @@ export default function S3Scanner() {
           S3 Bucket Scanner
         </h1>
         <p style={{ fontSize: "13px", color: "#555", marginTop: "4px" }}>
-          Find misconfigured AWS S3 buckets — public read, public write,
-          directory listing and more.
+          Crawls the target site and finds real S3 bucket URLs in page source
+          and JavaScript files — then tests only confirmed buckets for
+          misconfigurations.
         </p>
       </div>
 
+      {/* How it works */}
       <div
         style={{
-          background: "#1a1200",
-          border: "0.5px solid #633806",
+          background: "#0d0d2e",
+          border: "0.5px solid #3C3489",
           borderRadius: "10px",
-          padding: "12px 16px",
+          padding: "14px 16px",
           marginBottom: "20px",
-          fontSize: "13px",
-          color: "#BA7517",
         }}
       >
-        S3 misconfigurations have exposed billions of records. Capital One lost
-        100M customer records. Facebook exposed 500M user records. This scanner
-        finds these issues before attackers do.
+        <div
+          style={{
+            fontSize: "12px",
+            fontWeight: "500",
+            color: "#a89ff5",
+            marginBottom: "8px",
+          }}
+        >
+          How this scanner works
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          {[
+            "1. Crawls your site and all JavaScript files for S3 bucket URLs",
+            "2. Tests confirmed buckets — found directly in your source code",
+            "3. Tests possible buckets — common naming patterns (clearly labeled)",
+            "4. Only confirmed findings should be actioned immediately",
+          ].map((step, i) => (
+            <div key={i} style={{ fontSize: "12px", color: "#7F77DD" }}>
+              {step}
+            </div>
+          ))}
+        </div>
       </div>
 
+      {/* Form */}
       <div
         style={{
           background: "#131315",
@@ -104,17 +131,18 @@ export default function S3Scanner() {
                 marginBottom: "6px",
               }}
             >
-              Target domain
+              Target URL
             </label>
             <input
               type="text"
-              placeholder="e.g. startup.com or yourcompany.com"
+              placeholder="e.g. https://yourcompany.com"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleScan()}
             />
             <div style={{ fontSize: "11px", color: "#444", marginTop: "4px" }}>
-              Checks 35+ common S3 bucket naming patterns for this domain
+              Enter the full website URL — scanner will crawl source code for
+              real S3 references
             </div>
           </div>
 
@@ -141,7 +169,7 @@ export default function S3Scanner() {
             >
               I confirm I have{" "}
               <span style={{ color: "#a89ff5" }}>written authorization</span> to
-              scan for S3 buckets associated with this domain.
+              perform S3 security testing on this domain.
             </span>
           </label>
 
@@ -171,6 +199,7 @@ export default function S3Scanner() {
         </div>
       </div>
 
+      {/* Loading */}
       {loading && (
         <div
           style={{
@@ -199,11 +228,12 @@ export default function S3Scanner() {
             {loadingMsg}
           </div>
           <div style={{ color: "#444", fontSize: "12px" }}>
-            Checking 35+ bucket names — may take 1-2 minutes
+            Crawling site and testing buckets
           </div>
         </div>
       )}
 
+      {/* Results */}
       {results && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {/* Summary */}
@@ -216,25 +246,25 @@ export default function S3Scanner() {
           >
             {[
               {
-                label: "Buckets checked",
-                val: results.summary.bucketsChecked,
+                label: "JS files scanned",
+                val: results.summary.jsFilesScanned,
                 color: "#7F77DD",
               },
               {
-                label: "Buckets found",
-                val: results.summary.bucketsFound,
-                color: "#BA7517",
-              },
-              {
-                label: "Vulnerable",
-                val: results.summary.vulnerableBuckets,
+                label: "Confirmed buckets",
+                val: results.summary.confirmedBuckets,
                 color:
-                  results.summary.vulnerableBuckets > 0 ? "#E24B4A" : "#1D9E75",
+                  results.summary.confirmedBuckets > 0 ? "#BA7517" : "#1D9E75",
               },
               {
                 label: "Critical findings",
                 val: results.summary.critical,
                 color: results.summary.critical > 0 ? "#ff4444" : "#1D9E75",
+              },
+              {
+                label: "High findings",
+                val: results.summary.high,
+                color: results.summary.high > 0 ? "#E24B4A" : "#1D9E75",
               },
             ].map((s) => (
               <div
@@ -264,176 +294,365 @@ export default function S3Scanner() {
             ))}
           </div>
 
-          {/* Vulnerable buckets alert */}
-          {results.vulnerableBuckets.length > 0 && (
+          {/* Confirmed buckets list */}
+          {results.confirmedBuckets.length > 0 && (
             <div
               style={{
-                background: "#1a0505",
-                border: "0.5px solid #600",
+                background: "#131315",
+                border: "0.5px solid #1e1e22",
                 borderRadius: "12px",
                 padding: "16px 20px",
               }}
             >
               <div
                 style={{
-                  fontSize: "14px",
-                  fontWeight: "500",
-                  color: "#ff4444",
-                  marginBottom: "8px",
+                  fontSize: "12px",
+                  color: "#666",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.6px",
+                  marginBottom: "10px",
                 }}
               >
-                ⚠️ {results.vulnerableBuckets.length} vulnerable bucket(s) found
+                {results.confirmedBuckets.length} S3 bucket(s) found in site
+                source code
               </div>
-              {results.vulnerableBuckets.map((b, i) => (
+              {results.confirmedBuckets.map((b, i) => (
                 <div
                   key={i}
                   style={{
                     fontSize: "13px",
-                    color: "#E24B4A",
+                    color: "#a89ff5",
                     fontFamily: "monospace",
+                    padding: "4px 0",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
                   }}
                 >
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      padding: "2px 6px",
+                      borderRadius: "6px",
+                      background: "#0a1a14",
+                      color: "#1D9E75",
+                      border: "0.5px solid #085041",
+                    }}
+                  >
+                    CONFIRMED
+                  </span>
                   {b}.s3.amazonaws.com
                 </div>
               ))}
             </div>
           )}
 
-          {/* Findings */}
-          <div
-            style={{
-              background: "#131315",
-              border: "0.5px solid #1e1e22",
-              borderRadius: "12px",
-              overflow: "hidden",
-            }}
-          >
+          {/* Confirmed findings */}
+          {confirmedFindings.length > 0 && (
             <div
               style={{
-                padding: "14px 20px",
-                borderBottom: "0.5px solid #1e1e22",
-                fontSize: "12px",
-                color: "#666",
-                textTransform: "uppercase",
-                letterSpacing: "0.6px",
+                background: "#131315",
+                border: "0.5px solid #1e1e22",
+                borderRadius: "12px",
+                overflow: "hidden",
               }}
             >
-              {results.findings.length} findings
-            </div>
-
-            {results.findings.map((v, i) => {
-              const s = sevStyle(v.severity);
-              return (
-                <div
-                  key={i}
+              <div
+                style={{
+                  padding: "14px 20px",
+                  borderBottom: "0.5px solid #1e1e22",
+                  fontSize: "12px",
+                  color: "#e8e6f0",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.6px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span
                   style={{
-                    padding: "18px 20px",
-                    borderBottom:
-                      i < results.findings.length - 1
-                        ? "0.5px solid #0f0f11"
-                        : "none",
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "50%",
+                    background: "#E24B4A",
+                    display: "inline-block",
                   }}
-                >
+                />
+                {confirmedFindings.length} confirmed findings — action required
+              </div>
+              {confirmedFindings.map((v, i) => {
+                const s = sevStyle(v.severity);
+                return (
                   <div
+                    key={i}
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      marginBottom: "8px",
-                      flexWrap: "wrap",
+                      padding: "16px 20px",
+                      borderBottom:
+                        i < confirmedFindings.length - 1
+                          ? "0.5px solid #0f0f11"
+                          : "none",
                     }}
                   >
-                    <span
+                    <div
                       style={{
-                        fontSize: "11px",
-                        padding: "2px 8px",
-                        borderRadius: "10px",
-                        background: s.bg,
-                        color: s.color,
-                        border: `0.5px solid ${s.border}`,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        marginBottom: "8px",
+                        flexWrap: "wrap",
                       }}
                     >
-                      {v.severity}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "14px",
-                        fontWeight: "500",
-                        color: "#ccc",
-                      }}
-                    >
-                      {v.type}
-                    </span>
-                    {v.owasp && (
                       <span
                         style={{
                           fontSize: "11px",
                           padding: "2px 8px",
                           borderRadius: "10px",
-                          background: "#0d0d2e",
-                          color: "#7F77DD",
-                          border: "0.5px solid #3C3489",
+                          background: s.bg,
+                          color: s.color,
+                          border: `0.5px solid ${s.border}`,
                         }}
                       >
-                        {v.owasp}
+                        {v.severity}
                       </span>
+                      <span
+                        style={{
+                          fontSize: "14px",
+                          fontWeight: "500",
+                          color: "#ccc",
+                        }}
+                      >
+                        {v.type}
+                      </span>
+                    </div>
+                    {v.endpoint && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#555",
+                          fontFamily: "monospace",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        {v.endpoint}
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        color: "#777",
+                        marginBottom: "8px",
+                        lineHeight: "1.6",
+                      }}
+                    >
+                      {v.detail}
+                    </div>
+                    {v.evidence && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#555",
+                          fontFamily: "monospace",
+                          background: "#0d0d0f",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        {v.evidence}
+                      </div>
+                    )}
+                    {v.remediation && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#1D9E75",
+                          background: "#0a1a14",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          borderLeft: "2px solid #1D9E75",
+                        }}
+                      >
+                        Fix: {v.remediation}
+                      </div>
                     )}
                   </div>
-                  {v.url && (
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: "#555",
-                        fontFamily: "monospace",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      {v.url}
-                    </div>
-                  )}
-                  <div
+                );
+              })}
+            </div>
+          )}
+
+          {/* Possible findings */}
+          {possibleFindings.length > 0 && (
+            <div
+              style={{
+                background: "#131315",
+                border: "0.5px solid #1e1e22",
+                borderRadius: "12px",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                onClick={() => setShowPossible(!showPossible)}
+                style={{
+                  padding: "14px 20px",
+                  borderBottom: showPossible ? "0.5px solid #1e1e22" : "none",
+                  fontSize: "12px",
+                  color: "#666",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.6px",
+                  cursor: "pointer",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                  <span
                     style={{
-                      fontSize: "13px",
-                      color: "#777",
-                      marginBottom: "8px",
-                      lineHeight: "1.6",
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      background: "#BA7517",
+                      display: "inline-block",
                     }}
-                  >
-                    {v.detail}
-                  </div>
-                  {v.evidence && (
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: "#555",
-                        fontFamily: "monospace",
-                        background: "#0d0d0f",
-                        padding: "8px 12px",
-                        borderRadius: "6px",
-                        marginBottom: "8px",
-                      }}
-                    >
-                      {v.evidence}
-                    </div>
-                  )}
-                  {v.remediation && (
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: "#1D9E75",
-                        background: "#0a1a14",
-                        padding: "8px 12px",
-                        borderRadius: "6px",
-                        borderLeft: "2px solid #1D9E75",
-                      }}
-                    >
-                      Fix: {v.remediation}
-                    </div>
-                  )}
+                  />
+                  {possibleFindings.length} possible findings — verify ownership
+                  before acting
                 </div>
-              );
-            })}
-          </div>
+                <span>{showPossible ? "▲ Hide" : "▼ Show"}</span>
+              </div>
+              {showPossible &&
+                possibleFindings.map((v, i) => {
+                  const s = sevStyle(v.severity);
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        padding: "16px 20px",
+                        borderBottom:
+                          i < possibleFindings.length - 1
+                            ? "0.5px solid #0f0f11"
+                            : "none",
+                        background: "rgba(186,117,23,0.03)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "11px",
+                          color: "#BA7517",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        ⚠️ Ownership not confirmed — verify this bucket belongs
+                        to your organization
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          marginBottom: "8px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            padding: "2px 8px",
+                            borderRadius: "10px",
+                            background: s.bg,
+                            color: s.color,
+                            border: `0.5px solid ${s.border}`,
+                          }}
+                        >
+                          {v.severity}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "14px",
+                            fontWeight: "500",
+                            color: "#ccc",
+                          }}
+                        >
+                          {v.type}
+                        </span>
+                      </div>
+                      {v.endpoint && (
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "#555",
+                            fontFamily: "monospace",
+                            marginBottom: "6px",
+                          }}
+                        >
+                          {v.endpoint}
+                        </div>
+                      )}
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          color: "#777",
+                          marginBottom: "8px",
+                          lineHeight: "1.6",
+                        }}
+                      >
+                        {v.detail}
+                      </div>
+                      {v.remediation && (
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "#1D9E75",
+                            background: "#0a1a14",
+                            padding: "8px 12px",
+                            borderRadius: "6px",
+                            borderLeft: "2px solid #1D9E75",
+                          }}
+                        >
+                          Fix: {v.remediation}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+
+          {/* Info findings */}
+          {infoFindings.length > 0 &&
+            confirmedFindings.length === 0 &&
+            possibleFindings.length === 0 && (
+              <div
+                style={{
+                  background: "#131315",
+                  border: "0.5px solid #1e1e22",
+                  borderRadius: "12px",
+                  padding: "24px",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ fontSize: "32px", marginBottom: "12px" }}>✅</div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: "500",
+                    color: "#1D9E75",
+                    marginBottom: "8px",
+                  }}
+                >
+                  No S3 misconfigurations found
+                </div>
+                <div
+                  style={{ fontSize: "13px", color: "#555", lineHeight: "1.6" }}
+                >
+                  {infoFindings[0]?.detail}
+                </div>
+              </div>
+            )}
         </div>
       )}
     </div>
