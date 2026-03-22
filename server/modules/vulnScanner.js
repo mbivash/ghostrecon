@@ -1581,6 +1581,11 @@ async function deepScan(targetUrl) {
       results.findings.push(...xss, ...sqli, ...blind);
     }
 
+    // Stored XSS test
+    console.log("Testing for stored XSS...");
+    const storedXssFindings = await testStoredXSS(targetUrl, allForms, baseUrl);
+    results.findings.push(...storedXssFindings);
+
     const seen = new Set();
     results.findings = results.findings.filter((f) => {
       const key = `${f.type}-${f.endpoint || ""}-${f.parameter || ""}`;
@@ -1614,5 +1619,178 @@ async function deepScan(targetUrl) {
     throw err;
   }
 }
+// ── Stored XSS Detection ──────────────────────────────
+async function testStoredXSS(targetUrl, forms, baseUrl) {
+  const findings = [];
 
-module.exports = { deepScan, authenticatedScan };
+  const storedPayloads = [
+    {
+      payload: '<script>alert("ghostrecon-xss-test")</script>',
+      marker: "ghostrecon-xss-test",
+    },
+    {
+      payload: "<img src=x onerror=\"alert('ghostrecon-stored')\">",
+      marker: "ghostrecon-stored",
+    },
+    {
+      payload: '"><script>alert("gr-stored-xss")</script>',
+      marker: "gr-stored-xss",
+    },
+    { payload: "javascript:alert('gr-xss')", marker: "gr-xss" },
+    { payload: "<svg onload=\"alert('gr-svg-xss')\">", marker: "gr-svg-xss" },
+  ];
+
+  // Pages to check after submitting
+  const checkPages = new Set([targetUrl]);
+
+  // Submit payloads to all POST forms
+  for (const form of forms.filter((f) => f.method === "post").slice(0, 8)) {
+    for (const { payload, marker } of storedPayloads.slice(0, 3)) {
+      try {
+        const formData = {};
+        form.inputs.forEach((input) => {
+          const name = input.name.toLowerCase();
+          // Skip obvious non-text fields
+          if (name.includes("email")) {
+            formData[input.name] = `test${Date.now()}@ghostrecon-test.com`;
+          } else if (name.includes("phone") || name.includes("tel")) {
+            formData[input.name] = "9999999999";
+          } else if (
+            name.includes("price") ||
+            name.includes("amount") ||
+            name.includes("qty")
+          ) {
+            formData[input.name] = "1";
+          } else if (input.type === "number") {
+            formData[input.name] = "1";
+          } else {
+            formData[input.name] = payload;
+          }
+        });
+
+        const submitResponse = await axiosInstance.post(form.action, formData);
+
+        // Track where we might find the stored payload
+        if (submitResponse.status === 200 || submitResponse.status === 302) {
+          checkPages.add(form.action);
+          checkPages.add(form.pageUrl || targetUrl);
+
+          // If redirect, follow it
+          if (
+            submitResponse.status === 302 &&
+            submitResponse.headers["location"]
+          ) {
+            try {
+              const redirectUrl = new URL(
+                submitResponse.headers["location"],
+                baseUrl,
+              ).href;
+              checkPages.add(redirectUrl);
+            } catch (e) {}
+          }
+        }
+
+        // Check response immediately for reflected+stored combo
+        const immediateBody =
+          typeof submitResponse.data === "string"
+            ? submitResponse.data
+            : JSON.stringify(submitResponse.data);
+        if (immediateBody.includes(marker) && !immediateBody.includes("&lt;")) {
+          findings.push({
+            type: "Stored XSS (Immediate Reflection)",
+            severity: "High",
+            owasp: "A03:2021 - Injection",
+            parameter: form.inputs.map((i) => i.name).join(", "),
+            endpoint: form.action,
+            method: "POST",
+            payload,
+            detail: `XSS payload submitted via POST form and immediately reflected in response. The payload may be stored and displayed to other users.`,
+            evidence: `Marker "${marker}" found in POST response from ${form.action}`,
+            remediation:
+              "Encode all user input before storing and displaying. Use parameterized queries. Implement output encoding.",
+          });
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Now check all pages for stored payloads
+  console.log(`Checking ${checkPages.size} pages for stored XSS...`);
+
+  for (const pageUrl of checkPages) {
+    try {
+      const response = await axiosInstance.get(pageUrl);
+      const body =
+        typeof response.data === "string"
+          ? response.data
+          : JSON.stringify(response.data);
+
+      for (const { payload, marker } of storedPayloads) {
+        if (
+          body.includes(marker) &&
+          !body.includes("&lt;") &&
+          !body.includes("&#")
+        ) {
+          findings.push({
+            type: "Stored XSS Confirmed",
+            severity: "Critical",
+            owasp: "A03:2021 - Injection",
+            endpoint: pageUrl,
+            method: "GET",
+            payload,
+            detail: `Stored XSS confirmed. The XSS payload was submitted and is now persisted in the page at ${pageUrl}. Every user who visits this page will execute the malicious script. This can lead to mass session hijacking, credential theft, and account takeovers.`,
+            evidence: `Marker "${marker}" found stored and unencoded at ${pageUrl}`,
+            remediation:
+              "Immediately sanitize all stored data. Implement output encoding (HTML entity encoding) for all user-generated content. Use a Content Security Policy. Consider using DOMPurify for client-side sanitization.",
+          });
+          break;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Also check GET forms — some search results pages store and reflect
+  for (const form of forms.filter((f) => f.method === "get").slice(0, 5)) {
+    for (const { payload, marker } of storedPayloads.slice(0, 2)) {
+      try {
+        const testUrl = new URL(form.action);
+        form.inputs.forEach((input) =>
+          testUrl.searchParams.set(input.name, payload),
+        );
+        const response = await axiosInstance.get(testUrl.href);
+        const body =
+          typeof response.data === "string"
+            ? response.data
+            : JSON.stringify(response.data);
+
+        // Check if this page links to other pages that might show the stored content
+        if (body.includes(marker) && !body.includes("&lt;")) {
+          findings.push({
+            type: "XSS in Search/Filter Results",
+            severity: "High",
+            owasp: "A03:2021 - Injection",
+            parameter: form.inputs.map((i) => i.name).join(", "),
+            endpoint: testUrl.href,
+            method: "GET",
+            payload,
+            detail: `XSS payload reflected in search or filter results. If search terms are stored (search history, logs), this becomes stored XSS.`,
+            evidence: `Marker "${marker}" found unencoded in search results at ${testUrl.href}`,
+            remediation:
+              "Encode all output including search terms. Never reflect user input without sanitization.",
+          });
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Remove duplicates
+  const seen = new Set();
+  return findings.filter((f) => {
+    const key = `${f.type}-${f.endpoint}-${f.payload}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+module.exports = { deepScan, authenticatedScan, testStoredXSS };
