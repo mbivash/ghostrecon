@@ -693,5 +693,281 @@ router.post("/scan", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// ── OpenAPI/Swagger Scanner ───────────────────────────────────
+router.post("/swagger", async (req, res) => {
+  const { target, specUrl, consent } = req.body;
+
+  if (!consent)
+    return res.status(403).json({ error: "Authorization required." });
+  if (!target)
+    return res.status(400).json({ error: "Target URL is required." });
+
+  let baseUrl = target.trim();
+  if (!baseUrl.startsWith("http")) baseUrl = "http://" + baseUrl;
+
+  const findings = [];
+  let spec = null;
+  let specSource = null;
+
+  // Try to find the spec
+  const specUrls = specUrl
+    ? [specUrl]
+    : [
+        `${baseUrl}/swagger.json`,
+        `${baseUrl}/openapi.json`,
+        `${baseUrl}/api-docs`,
+        `${baseUrl}/swagger/v1/swagger.json`,
+        `${baseUrl}/swagger/v2/swagger.json`,
+        `${baseUrl}/v1/swagger.json`,
+        `${baseUrl}/v2/swagger.json`,
+        `${baseUrl}/api/swagger.json`,
+        `${baseUrl}/api/openapi.json`,
+        `${baseUrl}/docs/swagger.json`,
+        `${baseUrl}/.well-known/openapi.json`,
+      ];
+
+  for (const url of specUrls) {
+    try {
+      const res2 = await axiosInstance.get(url);
+      if (
+        res2.status === 200 &&
+        res2.data &&
+        (res2.data.swagger || res2.data.openapi || res2.data.paths)
+      ) {
+        spec = res2.data;
+        specSource = url;
+        findings.push({
+          type: "API Specification Exposed",
+          severity: "Medium",
+          owasp: "A05:2021 - Security Misconfiguration",
+          endpoint: url,
+          detail: `API specification found at ${url}. This gives attackers a complete map of all API endpoints, parameters, and authentication requirements.`,
+          evidence: `${url} returned valid ${spec.swagger ? "Swagger" : "OpenAPI"} specification`,
+          remediation:
+            "Restrict access to API documentation. Require authentication to view specs. Consider removing public API docs in production.",
+        });
+        break;
+      }
+    } catch (e) {}
+  }
+
+  if (!spec) {
+    return res.json({
+      success: true,
+      data: {
+        target: baseUrl,
+        specFound: false,
+        findings: [
+          {
+            type: "No API Specification Found",
+            severity: "Info",
+            detail: `No OpenAPI/Swagger specification found at common paths for ${baseUrl}.`,
+            evidence: `Checked ${specUrls.length} common spec paths`,
+            remediation:
+              "If you have an API spec, provide the URL directly for testing.",
+          },
+        ],
+        endpoints: [],
+        summary: { total: 0, critical: 0, high: 0, medium: 1, low: 0 },
+      },
+    });
+  }
+
+  // Extract all endpoints from spec
+  const endpoints = [];
+  const paths = spec.paths || {};
+  const basePath = spec.basePath || "";
+  const servers = spec.servers || [];
+  const serverUrl = servers.length > 0 ? servers[0].url : baseUrl;
+
+  Object.entries(paths).forEach(([path, methods]) => {
+    Object.entries(methods).forEach(([method, operation]) => {
+      if (
+        ["get", "post", "put", "delete", "patch", "options"].includes(
+          method.toLowerCase(),
+        )
+      ) {
+        const fullUrl = `${baseUrl}${basePath}${path}`;
+        endpoints.push({
+          method: method.toUpperCase(),
+          path,
+          fullUrl,
+          summary: operation.summary || "",
+          parameters: operation.parameters || [],
+          security: operation.security,
+          tags: operation.tags || [],
+          requiresAuth:
+            operation.security !== undefined && operation.security !== null,
+        });
+      }
+    });
+  });
+
+  console.log(`Found ${endpoints.length} endpoints in spec`);
+
+  // Test each endpoint
+  for (const endpoint of endpoints.slice(0, 20)) {
+    try {
+      // Test without auth
+      const noAuthRes = await axiosInstance.request({
+        method: endpoint.method,
+        url: endpoint.fullUrl,
+        timeout: 8000,
+      });
+
+      // Endpoint marked as requiring auth but returns 200 without auth
+      if (endpoint.requiresAuth && noAuthRes.status === 200) {
+        findings.push({
+          type: "API Authentication Not Enforced",
+          severity: "Critical",
+          owasp: "A07:2021 - Identification and Authentication Failures",
+          endpoint: endpoint.fullUrl,
+          method: endpoint.method,
+          detail: `Endpoint ${endpoint.method} ${endpoint.path} is documented as requiring authentication but returns HTTP 200 without any credentials. Authentication is not being enforced.`,
+          evidence: `${endpoint.method} ${endpoint.fullUrl} returned 200 without auth token`,
+          remediation:
+            "Implement authentication middleware on all protected endpoints. Verify auth checks are applied server-side, not just client-side.",
+        });
+      }
+
+      // Check for sensitive data in response
+      if (noAuthRes.status === 200) {
+        const body =
+          typeof noAuthRes.data === "string"
+            ? noAuthRes.data
+            : JSON.stringify(noAuthRes.data);
+        const sensitivePatterns = [
+          { pattern: /password/i, name: "password field" },
+          { pattern: /secret/i, name: "secret field" },
+          { pattern: /api_key/i, name: "API key" },
+          { pattern: /token/i, name: "token" },
+          { pattern: /private_key/i, name: "private key" },
+          { pattern: /ssn/i, name: "SSN" },
+          { pattern: /credit_card/i, name: "credit card" },
+        ];
+
+        for (const { pattern, name } of sensitivePatterns) {
+          if (pattern.test(body)) {
+            findings.push({
+              type: `Sensitive Data in API Response: ${name}`,
+              severity: "High",
+              owasp: "A02:2021 - Cryptographic Failures",
+              endpoint: endpoint.fullUrl,
+              method: endpoint.method,
+              detail: `API endpoint returns response containing ${name}. Sensitive data should never be exposed in API responses.`,
+              evidence: `${endpoint.method} ${endpoint.fullUrl} response contains ${name}`,
+              remediation:
+                "Use field filtering to exclude sensitive data from API responses. Implement response masking for sensitive fields.",
+            });
+            break;
+          }
+        }
+      }
+
+      // Test for injection in query parameters
+      for (const param of endpoint.parameters
+        .filter((p) => p.in === "query")
+        .slice(0, 3)) {
+        const sqliPayload = "' OR '1'='1";
+        try {
+          const testUrl = new URL(endpoint.fullUrl);
+          testUrl.searchParams.set(param.name, sqliPayload);
+          const sqliRes = await axiosInstance.request({
+            method: endpoint.method,
+            url: testUrl.href,
+            timeout: 8000,
+          });
+          const body = (
+            typeof sqliRes.data === "string"
+              ? sqliRes.data
+              : JSON.stringify(sqliRes.data)
+          ).toLowerCase();
+          const sqlErr = [
+            "sql syntax",
+            "mysql_",
+            "pg::",
+            "ora-",
+            "sqlite",
+          ].find((e) => body.includes(e));
+          if (sqlErr) {
+            findings.push({
+              type: "SQL Injection in API Parameter",
+              severity: "Critical",
+              owasp: "A03:2021 - Injection",
+              endpoint: endpoint.fullUrl,
+              method: endpoint.method,
+              parameter: param.name,
+              detail: `SQL injection in query parameter "${param.name}" of ${endpoint.method} ${endpoint.path}. Full database access possible.`,
+              evidence: `SQL error triggered in parameter "${param.name}"`,
+              remediation: "Use parameterized queries for all API parameters.",
+            });
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
+  // Check for security definitions
+  const securityDefs =
+    spec.securityDefinitions || spec.components?.securitySchemes || {};
+  if (Object.keys(securityDefs).length === 0) {
+    findings.push({
+      type: "No Security Schemes Defined",
+      severity: "High",
+      owasp: "A07:2021 - Identification and Authentication Failures",
+      detail:
+        "The API specification defines no security schemes. This may indicate authentication is not implemented or not documented.",
+      evidence: "No securityDefinitions or securitySchemes found in spec",
+      remediation:
+        "Define security schemes in your API spec. Implement JWT, API key, or OAuth2 authentication.",
+    });
+  }
+
+  // Check for HTTP in server URLs
+  if (servers.some((s) => s.url && s.url.startsWith("http:"))) {
+    findings.push({
+      type: "API Uses HTTP (Not HTTPS)",
+      severity: "High",
+      owasp: "A02:2021 - Cryptographic Failures",
+      detail:
+        "API specification defines HTTP server URLs. API traffic will be unencrypted, exposing all data and credentials.",
+      evidence: `Server URL uses HTTP: ${servers.find((s) => s.url.startsWith("http:"))?.url}`,
+      remediation:
+        "Update all server URLs to use HTTPS. Redirect HTTP to HTTPS.",
+    });
+  }
+
+  // Remove duplicates
+  const seen = new Set();
+  const uniqueFindings = findings.filter((f) => {
+    const key = `${f.type}-${f.endpoint}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const summary = {
+    endpointsTested: Math.min(endpoints.length, 20),
+    totalEndpoints: endpoints.length,
+    specSource,
+    critical: uniqueFindings.filter((f) => f.severity === "Critical").length,
+    high: uniqueFindings.filter((f) => f.severity === "High").length,
+    medium: uniqueFindings.filter((f) => f.severity === "Medium").length,
+    low: uniqueFindings.filter((f) => f.severity === "Low").length,
+    total: uniqueFindings.length,
+  };
+
+  res.json({
+    success: true,
+    data: {
+      target: baseUrl,
+      specFound: true,
+      specUrl: specSource,
+      endpoints: endpoints.slice(0, 50),
+      findings: uniqueFindings,
+      summary,
+    },
+  });
+});
 
 module.exports = router;

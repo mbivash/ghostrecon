@@ -4,57 +4,88 @@ import api from "../utils/api";
 export default function NetworkScanner() {
   const [target, setTarget] = useState("");
   const [consent, setConsent] = useState(false);
+  const [scanType, setScanType] = useState("common");
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState("");
   const [results, setResults] = useState(null);
   const [error, setError] = useState("");
+  const [showAllPorts, setShowAllPorts] = useState(false);
+  const [activeTab, setActiveTab] = useState("all");
 
   const handleScan = async () => {
-    if (!consent)
-      return setError("You must check the authorization box before scanning.");
-    if (!target.trim()) return setError("Please enter a target IP or domain.");
-
+    if (!consent) return setError("You must check the authorization box.");
+    if (!target.trim()) return setError("Please enter a target.");
     setLoading(true);
     setError("");
     setResults(null);
+
+    const messages = [
+      "Resolving hostname...",
+      "Scanning ports...",
+      "Grabbing service banners...",
+      "Detecting service versions...",
+      "Analyzing security risks...",
+      "Generating findings...",
+    ];
+    let i = 0;
+    setLoadingMsg(messages[0]);
+    const interval = setInterval(() => {
+      i++;
+      if (i < messages.length) setLoadingMsg(messages[i]);
+    }, 8000);
 
     try {
       const res = await api.post("/api/network/scan", {
         target: target.trim(),
         consent,
+        scanType,
       });
       setResults(res.data.data);
+      setActiveTab("all");
     } catch (err) {
-      setError(
-        err.response?.data?.error || "Scan failed. Is the server running?",
-      );
+      setError(err.response?.data?.error || "Scan failed.");
     } finally {
+      clearInterval(interval);
       setLoading(false);
     }
   };
 
-  const severityColor = (service) => {
-    const dangerous = [
-      "ftp",
-      "telnet",
-      "smtp",
-      "http",
-      "rdp",
-      "vnc",
-      "ssh",
-      "smb",
-    ];
-    if (dangerous.includes(service.toLowerCase())) return "#E24B4A";
-    return "#1D9E75";
+  const riskColor = (risk) => {
+    if (risk === "Critical") return "#ff4444";
+    if (risk === "High") return "#E24B4A";
+    if (risk === "Medium") return "#BA7517";
+    if (risk === "Low") return "#1D9E75";
+    return "#555";
   };
 
+  const sevStyle = (sev) => {
+    if (sev === "Critical")
+      return { bg: "#1a0505", color: "#ff4444", border: "#600" };
+    if (sev === "High")
+      return { bg: "#1a0a0a", color: "#E24B4A", border: "#791F1F" };
+    if (sev === "Medium")
+      return { bg: "#1a1200", color: "#BA7517", border: "#633806" };
+    if (sev === "Low")
+      return { bg: "#0a1400", color: "#639922", border: "#27500A" };
+    return { bg: "#0d0d2e", color: "#7F77DD", border: "#3C3489" };
+  };
+
+  const filtered =
+    results?.findings?.filter((f) => {
+      if (activeTab === "all") return true;
+      return f.severity?.toLowerCase() === activeTab;
+    }) || [];
+
   return (
-    <div style={{ padding: "32px", maxWidth: "900px" }}>
+    <div style={{ padding: "32px", maxWidth: "1000px" }}>
       <div style={{ marginBottom: "28px" }}>
         <h1 style={{ fontSize: "22px", fontWeight: "500", color: "#e8e6f0" }}>
           Network Scanner
         </h1>
         <p style={{ fontSize: "13px", color: "#555", marginTop: "4px" }}>
-          Scan open ports and detect services using Shodan InternetDB.
+          Real TCP port scanning with service detection, banner grabbing and
+          version fingerprinting. Finds exposed databases, remote access, and
+          dangerous services.
         </p>
       </div>
 
@@ -77,17 +108,77 @@ export default function NetworkScanner() {
                 marginBottom: "6px",
               }}
             >
-              Target IP or domain
+              Target
             </label>
             <input
               type="text"
-              placeholder="e.g. scanme.nmap.org or 45.33.32.156"
+              placeholder="e.g. 192.168.1.1 or example.com"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleScan()}
             />
             <div style={{ fontSize: "11px", color: "#444", marginTop: "4px" }}>
-              Works on any public IP or domain. Test with: scanme.nmap.org
+              IP address or hostname — real TCP port scanner
+            </div>
+          </div>
+
+          <div>
+            <label
+              style={{
+                fontSize: "12px",
+                color: "#666",
+                display: "block",
+                marginBottom: "8px",
+              }}
+            >
+              Scan type
+            </label>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {[
+                {
+                  val: "quick",
+                  label: "Quick",
+                  desc: "20 critical ports — fast",
+                },
+                { val: "common", label: "Common", desc: "80 important ports" },
+                { val: "full", label: "Full", desc: "80+ ports — thorough" },
+              ].map((type) => (
+                <button
+                  key={type.val}
+                  onClick={() => setScanType(type.val)}
+                  style={{
+                    flex: 1,
+                    padding: "10px",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    background: scanType === type.val ? "#13121f" : "#0d0d0f",
+                    border:
+                      scanType === type.val
+                        ? "0.5px solid #7F77DD"
+                        : "0.5px solid #1e1e22",
+                    textAlign: "left",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: "500",
+                      color: scanType === type.val ? "#a89ff5" : "#ccc",
+                    }}
+                  >
+                    {type.label}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: "#555",
+                      marginTop: "2px",
+                    }}
+                  >
+                    {type.desc}
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
 
@@ -114,7 +205,7 @@ export default function NetworkScanner() {
             >
               I confirm I have{" "}
               <span style={{ color: "#a89ff5" }}>written authorization</span> to
-              scan this target. Unauthorized scanning is illegal.
+              perform port scanning on this target.
             </span>
           </label>
 
@@ -139,7 +230,7 @@ export default function NetworkScanner() {
             disabled={loading}
             style={{ alignSelf: "flex-start", padding: "10px 28px" }}
           >
-            {loading ? "Scanning..." : "Start Scan"}
+            {loading ? "Scanning..." : "Start Port Scan"}
           </button>
         </div>
       </div>
@@ -166,18 +257,20 @@ export default function NetworkScanner() {
             }}
           />
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-          <div style={{ color: "#666", fontSize: "14px" }}>
-            Scanning {target}...
+          <div
+            style={{ color: "#a89ff5", fontSize: "14px", marginBottom: "6px" }}
+          >
+            {loadingMsg}
           </div>
-          <div style={{ color: "#444", fontSize: "12px", marginTop: "6px" }}>
-            Querying Shodan InternetDB...
+          <div style={{ color: "#444", fontSize: "12px" }}>
+            Real TCP scan — may take 1–3 minutes
           </div>
         </div>
       )}
 
       {results && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Result header */}
+          {/* Target info */}
           <div
             style={{
               background: "#131315",
@@ -185,288 +278,414 @@ export default function NetworkScanner() {
               borderRadius: "12px",
               padding: "16px 20px",
               display: "flex",
-              justifyContent: "space-between",
               alignItems: "center",
+              gap: "20px",
             }}
           >
-            <div>
+            <div style={{ flex: 1 }}>
               <div
                 style={{
-                  fontSize: "14px",
+                  fontSize: "16px",
                   fontWeight: "500",
                   color: "#e8e6f0",
                 }}
               >
-                {results.host}
+                {results.target}
               </div>
               <div
-                style={{ fontSize: "12px", color: "#555", marginTop: "2px" }}
+                style={{ fontSize: "13px", color: "#555", marginTop: "4px" }}
               >
-                {results.ports.length} open ports · {results.vulns?.length || 0}{" "}
-                known CVEs · via {results.source}
+                IP: {results.ip}
               </div>
             </div>
-            <div
-              style={{
-                fontSize: "11px",
-                padding: "4px 10px",
-                borderRadius: "20px",
-                background:
-                  results.vulns?.length > 0
-                    ? "#1a0505"
-                    : results.ports.length > 0
-                      ? "#1a0a0a"
-                      : "#0a1a14",
-                color:
-                  results.vulns?.length > 0
-                    ? "#ff4444"
-                    : results.ports.length > 0
-                      ? "#E24B4A"
-                      : "#1D9E75",
-                border: `0.5px solid ${results.vulns?.length > 0 ? "#600" : results.ports.length > 0 ? "#791F1F" : "#085041"}`,
-              }}
-            >
-              {results.vulns?.length > 0
-                ? "Vulnerable"
-                : results.ports.length > 0
-                  ? "Exposed"
-                  : "Clean"}
+            <div style={{ textAlign: "center" }}>
+              <div
+                style={{
+                  fontSize: "28px",
+                  fontWeight: "500",
+                  color:
+                    results.summary.critical > 0
+                      ? "#ff4444"
+                      : results.summary.high > 0
+                        ? "#E24B4A"
+                        : "#1D9E75",
+                }}
+              >
+                {results.summary.openPorts}
+              </div>
+              <div style={{ fontSize: "11px", color: "#444" }}>open ports</div>
             </div>
           </div>
 
-          {/* Tags */}
-          {results.tags?.length > 0 && (
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              {results.tags.map((tag, i) => (
-                <span
-                  key={i}
+          {/* Summary */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(5, 1fr)",
+              gap: "10px",
+            }}
+          >
+            {[
+              {
+                label: "Ports scanned",
+                val: results.summary.portsScanned,
+                color: "#7F77DD",
+              },
+              {
+                label: "Open ports",
+                val: results.summary.openPorts,
+                color: "#e8e6f0",
+              },
+              {
+                label: "Critical",
+                val: results.summary.critical,
+                color: results.summary.critical > 0 ? "#ff4444" : "#1D9E75",
+              },
+              {
+                label: "High",
+                val: results.summary.high,
+                color: results.summary.high > 0 ? "#E24B4A" : "#1D9E75",
+              },
+              {
+                label: "Total findings",
+                val: results.summary.total,
+                color: "#e8e6f0",
+              },
+            ].map((s) => (
+              <div
+                key={s.label}
+                style={{
+                  background: "#131315",
+                  border: "0.5px solid #1e1e22",
+                  borderRadius: "10px",
+                  padding: "12px",
+                }}
+              >
+                <div
                   style={{
-                    fontSize: "11px",
-                    padding: "3px 10px",
-                    borderRadius: "12px",
-                    background: "#0d0d2e",
-                    color: "#7F77DD",
-                    border: "0.5px solid #3C3489",
+                    fontSize: "20px",
+                    fontWeight: "500",
+                    color: s.color,
                   }}
                 >
-                  {tag}
+                  {s.val}
+                </div>
+                <div
+                  style={{ fontSize: "11px", color: "#555", marginTop: "2px" }}
+                >
+                  {s.label}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Open ports table */}
+          {results.openPorts.length > 0 && (
+            <div
+              style={{
+                background: "#131315",
+                border: "0.5px solid #1e1e22",
+                borderRadius: "12px",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  padding: "14px 20px",
+                  borderBottom: "0.5px solid #1e1e22",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "#666",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.6px",
+                  }}
+                >
+                  {results.openPorts.length} open ports
                 </span>
-              ))}
-            </div>
-          )}
-
-          {/* Ports table */}
-          {results.ports.length > 0 && (
-            <div
-              style={{
-                background: "#131315",
-                border: "0.5px solid #1e1e22",
-                borderRadius: "12px",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  padding: "12px 20px",
-                  borderBottom: "0.5px solid #1e1e22",
-                  fontSize: "11px",
-                  color: "#444",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.6px",
-                }}
-              >
-                Open ports
               </div>
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: "13px",
-                }}
-              >
-                <thead>
-                  <tr style={{ borderBottom: "0.5px solid #1e1e22" }}>
-                    {["Port", "Protocol", "State", "Service", "Risk"].map(
-                      (h) => (
-                        <th
-                          key={h}
-                          style={{
-                            padding: "10px 20px",
-                            textAlign: "left",
-                            fontSize: "11px",
-                            color: "#444",
-                            fontWeight: "500",
-                            letterSpacing: "0.5px",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          {h}
-                        </th>
-                      ),
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.ports.map((p, i) => (
-                    <tr
-                      key={i}
-                      style={{
-                        borderBottom: "0.5px solid #0f0f11",
-                        background: i % 2 === 0 ? "transparent" : "#0f0f11",
-                      }}
-                    >
-                      <td
-                        style={{
-                          padding: "12px 20px",
-                          fontFamily: "monospace",
-                          color: "#a89ff5",
-                        }}
-                      >
-                        {p.port}
-                      </td>
-                      <td style={{ padding: "12px 20px", color: "#777" }}>
-                        {p.protocol}
-                      </td>
-                      <td style={{ padding: "12px 20px" }}>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            padding: "2px 8px",
-                            borderRadius: "10px",
-                            background: "#0a1a14",
-                            color: "#1D9E75",
-                            border: "0.5px solid #085041",
-                          }}
-                        >
-                          open
-                        </span>
-                      </td>
-                      <td style={{ padding: "12px 20px", color: "#ccc" }}>
-                        {p.service}
-                      </td>
-                      <td style={{ padding: "12px 20px" }}>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            padding: "2px 8px",
-                            borderRadius: "10px",
-                            color: severityColor(p.service),
-                            background:
-                              severityColor(p.service) === "#E24B4A"
-                                ? "#1a0a0a"
-                                : "#0a1a14",
-                            border: `0.5px solid ${severityColor(p.service) === "#E24B4A" ? "#791F1F" : "#085041"}`,
-                          }}
-                        >
-                          {severityColor(p.service) === "#E24B4A"
-                            ? "Review"
-                            : "Low risk"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* CVEs */}
-          {results.vulns?.length > 0 && (
-            <div
-              style={{
-                background: "#131315",
-                border: "0.5px solid #1e1e22",
-                borderRadius: "12px",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  padding: "12px 20px",
-                  borderBottom: "0.5px solid #1e1e22",
-                  fontSize: "11px",
-                  color: "#444",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.6px",
-                }}
-              >
-                Known vulnerabilities (CVEs)
-              </div>
-              {results.vulns.map((vuln, i) => (
+              {(showAllPorts
+                ? results.openPorts
+                : results.openPorts.slice(0, 15)
+              ).map((port, i) => (
                 <div
                   key={i}
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "space-between",
+                    gap: "12px",
                     padding: "12px 20px",
-                    borderBottom:
-                      i < results.vulns.length - 1
-                        ? "0.5px solid #0f0f11"
-                        : "none",
+                    borderBottom: "0.5px solid #0f0f11",
                   }}
                 >
-                  <div
+                  <span
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
+                      fontSize: "14px",
+                      fontWeight: "500",
+                      color: "#a89ff5",
+                      fontFamily: "monospace",
+                      width: "50px",
+                      flexShrink: 0,
                     }}
                   >
+                    {port.port}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "13px",
+                      color: "#ccc",
+                      width: "120px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {port.service}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: riskColor(port.risk),
+                      padding: "2px 8px",
+                      borderRadius: "10px",
+                      background: "#0d0d0f",
+                      border: `0.5px solid ${riskColor(port.risk)}33`,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {port.risk}
+                  </span>
+                  <span style={{ fontSize: "12px", color: "#555", flex: 1 }}>
+                    {port.description}
+                  </span>
+                  {port.version && (
                     <span
                       style={{
                         fontSize: "11px",
-                        padding: "2px 8px",
-                        borderRadius: "10px",
-                        background: "#1a0a0a",
-                        color: "#E24B4A",
-                        border: "0.5px solid #791F1F",
+                        color: "#7F77DD",
+                        fontFamily: "monospace",
+                        flexShrink: 0,
                       }}
                     >
-                      {vuln.severity}
+                      {port.version}
                     </span>
+                  )}
+                  {port.banner && !port.version && (
                     <span
                       style={{
-                        fontSize: "13px",
-                        color: "#ccc",
+                        fontSize: "11px",
+                        color: "#444",
                         fontFamily: "monospace",
+                        flexShrink: 0,
+                        maxWidth: "200px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
                       }}
                     >
-                      {vuln.id}
+                      {port.banner.substring(0, 50)}
                     </span>
-                  </div>
-                  <a
-                    href={vuln.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      fontSize: "11px",
-                      color: "#7F77DD",
-                      textDecoration: "none",
-                    }}
-                  >
-                    View CVE →
-                  </a>
+                  )}
                 </div>
               ))}
+              {results.openPorts.length > 15 && (
+                <div
+                  onClick={() => setShowAllPorts(!showAllPorts)}
+                  style={{
+                    padding: "12px 20px",
+                    textAlign: "center",
+                    fontSize: "13px",
+                    color: "#7F77DD",
+                    cursor: "pointer",
+                    borderTop: "0.5px solid #0f0f11",
+                  }}
+                >
+                  {showAllPorts
+                    ? "▲ Show less"
+                    : `▼ Show all ${results.openPorts.length} ports`}
+                </div>
+              )}
             </div>
           )}
 
-          {results.ports.length === 0 && results.vulns?.length === 0 && (
+          {/* Filter tabs */}
+          <div
+            style={{
+              display: "flex",
+              gap: "4px",
+              background: "#131315",
+              padding: "4px",
+              borderRadius: "10px",
+              border: "0.5px solid #1e1e22",
+              width: "fit-content",
+            }}
+          >
+            {[
+              { label: `All (${results.summary.total})`, val: "all" },
+              {
+                label: `Critical (${results.summary.critical})`,
+                val: "critical",
+              },
+              { label: `High (${results.summary.high})`, val: "high" },
+              { label: `Medium (${results.summary.medium})`, val: "medium" },
+              { label: `Low (${results.summary.low})`, val: "low" },
+            ].map((tab) => (
+              <button
+                key={tab.val}
+                onClick={() => setActiveTab(tab.val)}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  background: activeTab === tab.val ? "#7F77DD" : "transparent",
+                  color: activeTab === tab.val ? "white" : "#666",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Findings */}
+          <div
+            style={{
+              background: "#131315",
+              border: "0.5px solid #1e1e22",
+              borderRadius: "12px",
+              overflow: "hidden",
+            }}
+          >
             <div
               style={{
-                background: "#131315",
-                border: "0.5px solid #1e1e22",
-                borderRadius: "12px",
-                padding: "32px",
-                textAlign: "center",
-                color: "#1D9E75",
-                fontSize: "14px",
+                padding: "14px 20px",
+                borderBottom: "0.5px solid #1e1e22",
+                fontSize: "12px",
+                color: "#666",
+                textTransform: "uppercase",
+                letterSpacing: "0.6px",
               }}
             >
-              No open ports or vulnerabilities found on this target.
+              {filtered.length} security findings
             </div>
-          )}
+            {filtered.length === 0 ? (
+              <div
+                style={{
+                  padding: "32px",
+                  textAlign: "center",
+                  color: "#1D9E75",
+                  fontSize: "14px",
+                }}
+              >
+                No findings in this category.
+              </div>
+            ) : (
+              filtered.map((v, i) => {
+                const s = sevStyle(v.severity);
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      padding: "18px 20px",
+                      borderBottom:
+                        i < filtered.length - 1
+                          ? "0.5px solid #0f0f11"
+                          : "none",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        marginBottom: "8px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          background: s.bg,
+                          color: s.color,
+                          border: `0.5px solid ${s.border}`,
+                        }}
+                      >
+                        {v.severity}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "14px",
+                          fontWeight: "500",
+                          color: "#ccc",
+                        }}
+                      >
+                        {v.type}
+                      </span>
+                      {v.owasp && (
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            padding: "2px 8px",
+                            borderRadius: "10px",
+                            background: "#0d0d2e",
+                            color: "#7F77DD",
+                            border: "0.5px solid #3C3489",
+                          }}
+                        >
+                          {v.owasp}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        color: "#777",
+                        marginBottom: "8px",
+                        lineHeight: "1.6",
+                      }}
+                    >
+                      {v.detail}
+                    </div>
+                    {v.evidence && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#555",
+                          fontFamily: "monospace",
+                          background: "#0d0d0f",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        {v.evidence}
+                      </div>
+                    )}
+                    {v.remediation && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#1D9E75",
+                          background: "#0a1a14",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          borderLeft: "2px solid #1D9E75",
+                        }}
+                      >
+                        Fix: {v.remediation}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       )}
     </div>

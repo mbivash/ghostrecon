@@ -1,6 +1,8 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
+const { testBlindSSRF, testBlindXSS, testBlindSQLi } = require("./oobDetector");
+
 const {
   testAdvancedXSS,
   testAdvancedSQLi,
@@ -1612,6 +1614,14 @@ async function deepScan(targetUrl) {
         fingerprintTechnologies(targetUrl, html, headers),
         testRequestSmuggling(targetUrl),
       ]);
+    // Out-of-band blind detection
+    console.log("Running out-of-band blind detection...");
+    const [blindSSRF, blindXSS, blindSQLi] = await Promise.all([
+      testBlindSSRF(targetUrl, allForms, axiosInstance),
+      testBlindXSS(allForms, axiosInstance),
+      testBlindSQLi(allForms, axiosInstance),
+    ]);
+    results.findings.push(...blindSSRF, ...blindXSS, ...blindSQLi);
 
     results.findings.push(
       ...protoFindings,
