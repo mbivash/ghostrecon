@@ -47,6 +47,16 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route
+          path="/IDORScanners"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <IDORScanner />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/secrets"
           element={
             <ProtectedRoute>
