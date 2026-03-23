@@ -16,6 +16,7 @@ const nav = [
       { label: "Subdomain takeover", path: "/takeover" },
       { label: "Email security", path: "/emailsecurity" },
       { label: "Authenticated scanner", path: "/authscan" },
+      { label: "IDOR scanner", path: "/idorscan" },
       { label: "API scanner", path: "/apiscan" },
       { label: "WordPress scanner", path: "/wordpress" },
       { label: "S3 bucket scanner", path: "/s3scan" },

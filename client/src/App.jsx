@@ -15,6 +15,7 @@ import ScheduledScans from "./pages/ScheduledScans";
 import Settings from "./pages/Settings";
 import EmailSecurity from "./pages/EmailSecurity";
 import AuthenticatedScanner from "./pages/AuthenticatedScanner";
+import IDORScanner from "./pages/IDORScanner";
 import APIScanner from "./pages/APIScanner";
 import Compliance from "./pages/Compliance";
 import Landing from "./pages/Landing";
