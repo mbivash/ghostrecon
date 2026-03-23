@@ -68,6 +68,7 @@ app.use("/api/dnscheck", auth, require("./routes/dnscheck"));
 app.use("/api/secretscan", auth, require("./routes/secretscan"));
 app.use("/api/graphql-scan", auth, require("./routes/graphql"));
 app.use("/api/oauth", auth, require("./routes/oauth"));
+app.use("/api/idorscan", auth, scanLimiter, require("./routes/idorscan"));
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "GhostRecon server running" });

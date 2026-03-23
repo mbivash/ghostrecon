@@ -1,7 +1,7 @@
 const express = require("express");
-const router  = express.Router();
+const router = express.Router();
 const { runIDORScan } = require("../modules/idorTester");
-const { scansDb }     = require("../database");
+const { scansDb } = require("../database");
 
 // Active sessions for SSE streaming
 const activeSessions = new Map();
@@ -22,22 +22,47 @@ router.get("/progress/:sessionId", (req, res) => {
 function push(sessionId, event) {
   const res = activeSessions.get(sessionId);
   if (!res) return;
-  try { res.write(`data: ${JSON.stringify({ ...event, ts: new Date().toISOString() })}\n\n`); } catch (e) {}
+  try {
+    res.write(
+      `data: ${JSON.stringify({ ...event, ts: new Date().toISOString() })}\n\n`,
+    );
+  } catch (e) {}
 }
 
 // POST /scan — run IDOR scan
 router.post("/scan", async (req, res) => {
-  const { targetUrl, loginUrl, account1, account2, authType, customEndpoints, consent, sessionId } = req.body;
+  const {
+    targetUrl,
+    loginUrl,
+    account1,
+    account2,
+    authType,
+    customEndpoints,
+    consent,
+    sessionId,
+  } = req.body;
 
-  if (!consent)    return res.status(403).json({ error: "Authorization required." });
-  if (!targetUrl)  return res.status(400).json({ error: "Target URL is required." });
-  if (!account1?.username || !account1?.password) return res.status(400).json({ error: "Account 1 credentials required." });
-  if (!account2?.username || !account2?.password) return res.status(400).json({ error: "Account 2 credentials required." });
+  if (!consent)
+    return res.status(403).json({ error: "Authorization required." });
+  if (!targetUrl)
+    return res.status(400).json({ error: "Target URL is required." });
+  if (!account1?.username || !account1?.password)
+    return res.status(400).json({ error: "Account 1 credentials required." });
+  if (!account2?.username || !account2?.password)
+    return res.status(400).json({ error: "Account 2 credentials required." });
 
   if (sessionId) {
-    push(sessionId, { type: "log", msg: "Starting two-account IDOR scan...", percent: 5 });
+    push(sessionId, {
+      type: "log",
+      msg: "Starting two-account IDOR scan...",
+      percent: 5,
+    });
     push(sessionId, { type: "log", msg: `Target: ${targetUrl}`, percent: 8 });
-    push(sessionId, { type: "log", msg: `Logging in as Account A: ${account1.username}`, percent: 15 });
+    push(sessionId, {
+      type: "log",
+      msg: `Logging in as Account A: ${account1.username}`,
+      percent: 15,
+    });
   }
 
   try {
@@ -51,26 +76,51 @@ router.post("/scan", async (req, res) => {
     });
 
     if (sessionId) {
-      push(sessionId, { type: "log", msg: `Account A authenticated`, percent: 30 });
-      push(sessionId, { type: "log", msg: `Account B authenticated`, percent: 40 });
-      push(sessionId, { type: "log", msg: `Discovered ${results.apiEndpoints.length} API endpoints`, percent: 55 });
-      push(sessionId, { type: "log", msg: `Testing ${results.testedEndpoints.length} endpoints for IDOR...`, percent: 65 });
-      push(sessionId, { type: "log", msg: `Scan complete — ${results.findings.length} findings`, percent: 100 });
+      push(sessionId, {
+        type: "log",
+        msg: `Account A authenticated`,
+        percent: 30,
+      });
+      push(sessionId, {
+        type: "log",
+        msg: `Account B authenticated`,
+        percent: 40,
+      });
+      push(sessionId, {
+        type: "log",
+        msg: `Discovered ${results.apiEndpoints.length} API endpoints`,
+        percent: 55,
+      });
+      push(sessionId, {
+        type: "log",
+        msg: `Testing ${results.testedEndpoints.length} endpoints for IDOR...`,
+        percent: 65,
+      });
+      push(sessionId, {
+        type: "log",
+        msg: `Scan complete — ${results.findings.length} findings`,
+        percent: 100,
+      });
       for (const f of results.findings) {
-        push(sessionId, { type: "finding", finding: { type: f.type, severity: f.severity, endpoint: f.endpoint } });
+        push(sessionId, {
+          type: "finding",
+          finding: { type: f.type, severity: f.severity, endpoint: f.endpoint },
+        });
       }
       push(sessionId, { type: "complete", summary: results.summary });
     }
 
-    scansDb.insert({
-      type: "IDOR Scan",
-      userId: req.user?.id,
-      target: targetUrl,
-      result: results,
-      findings_count: results.findings.length,
-      severity: results.findings.length > 0 ? "high" : "info",
-      scanned_at: new Date().toISOString(),
-    }).catch((e) => console.error(e));
+    scansDb
+      .insert({
+        type: "IDOR Scan",
+        userId: req.user?.id,
+        target: targetUrl,
+        result: results,
+        findings_count: results.findings.length,
+        severity: results.findings.length > 0 ? "high" : "info",
+        scanned_at: new Date().toISOString(),
+      })
+      .catch((e) => console.error(e));
 
     res.json({ success: true, data: results });
   } catch (err) {

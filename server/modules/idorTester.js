@@ -25,25 +25,32 @@ async function createSession(loginUrl, username, password) {
 
   // Find login form
   let formAction = loginUrl;
-  let csrfToken  = null;
+  let csrfToken = null;
 
   $("form").each((i, form) => {
     const inputs = [];
-    $(form).find("input").each((j, input) => {
-      inputs.push({
-        name:  $(input).attr("name"),
-        type:  $(input).attr("type") || "text",
-        value: $(input).attr("value") || "",
+    $(form)
+      .find("input")
+      .each((j, input) => {
+        inputs.push({
+          name: $(input).attr("name"),
+          type: $(input).attr("type") || "text",
+          value: $(input).attr("value") || "",
+        });
       });
-    });
-    const hasPassword = inputs.some((inp) => inp.type === "password" || (inp.name || "").toLowerCase().includes("pass"));
+    const hasPassword = inputs.some(
+      (inp) =>
+        inp.type === "password" ||
+        (inp.name || "").toLowerCase().includes("pass"),
+    );
     if (hasPassword) {
       formAction = new URL($(form).attr("action") || loginUrl, loginUrl).href;
       // Grab CSRF token if present
-      const csrfInput = inputs.find((inp) =>
-        (inp.name || "").toLowerCase().includes("csrf") ||
-        (inp.name || "").toLowerCase().includes("token") ||
-        (inp.name || "").toLowerCase().includes("nonce")
+      const csrfInput = inputs.find(
+        (inp) =>
+          (inp.name || "").toLowerCase().includes("csrf") ||
+          (inp.name || "").toLowerCase().includes("token") ||
+          (inp.name || "").toLowerCase().includes("nonce"),
       );
       if (csrfInput) csrfToken = csrfInput.value;
     }
@@ -52,14 +59,22 @@ async function createSession(loginUrl, username, password) {
   // Build form data
   const formData = new URLSearchParams();
   $("form input").each((i, input) => {
-    const name  = $(input).attr("name");
-    const type  = $(input).attr("type") || "text";
+    const name = $(input).attr("name");
+    const type = $(input).attr("type") || "text";
     const value = $(input).attr("value") || "";
     if (!name) return;
     const nameLower = name.toLowerCase();
-    if (type === "password" || nameLower.includes("pass") || nameLower.includes("pwd")) {
+    if (
+      type === "password" ||
+      nameLower.includes("pass") ||
+      nameLower.includes("pwd")
+    ) {
       formData.append(name, password);
-    } else if (nameLower.includes("user") || nameLower.includes("email") || nameLower.includes("login")) {
+    } else if (
+      nameLower.includes("user") ||
+      nameLower.includes("email") ||
+      nameLower.includes("login")
+    ) {
       formData.append(name, username);
     } else if (value) {
       formData.append(name, value);
@@ -73,7 +88,10 @@ async function createSession(loginUrl, username, password) {
   });
 
   const cookies = loginResponse.headers["set-cookie"] || [];
-  if (cookies.length === 0) throw new Error(`Login failed for ${username} — no session cookies returned`);
+  if (cookies.length === 0)
+    throw new Error(
+      `Login failed for ${username} — no session cookies returned`,
+    );
 
   const cookieHeader = cookies.map((c) => c.split(";")[0]).join("; ");
 
@@ -102,8 +120,16 @@ async function createAPISession(loginUrl, username, password) {
   const loginEndpoints = [
     { url: loginUrl, method: "post", data: { email: username, password } },
     { url: loginUrl, method: "post", data: { username, password } },
-    { url: loginUrl.replace("/login", "/auth"), method: "post", data: { email: username, password } },
-    { url: loginUrl.replace("/login", "/signin"), method: "post", data: { email: username, password } },
+    {
+      url: loginUrl.replace("/login", "/auth"),
+      method: "post",
+      data: { email: username, password },
+    },
+    {
+      url: loginUrl.replace("/login", "/signin"),
+      method: "post",
+      data: { email: username, password },
+    },
   ];
 
   for (const endpoint of loginEndpoints) {
@@ -129,7 +155,8 @@ async function createAPISession(loginUrl, username, password) {
           timeout: 15000,
           validateStatus: () => true,
           headers: {
-            "User-Agent": "Mozilla/5.0 (compatible; GhostRecon Security Scanner)",
+            "User-Agent":
+              "Mozilla/5.0 (compatible; GhostRecon Security Scanner)",
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
@@ -146,8 +173,16 @@ async function createAPISession(loginUrl, username, password) {
 function extractIDsFromURL(url) {
   const ids = [];
   const patterns = [
-    { regex: /[?&](id|user_id|account_id|order_id|profile_id|invoice_id|doc_id|file_id|record_id|item_id)=(\d+)/gi, type: "query" },
-    { regex: /\/(user|account|order|invoice|profile|document|file|record|item|transaction|trade|portfolio|wallet)\/(\d+)/gi, type: "path" },
+    {
+      regex:
+        /[?&](id|user_id|account_id|order_id|profile_id|invoice_id|doc_id|file_id|record_id|item_id)=(\d+)/gi,
+      type: "query",
+    },
+    {
+      regex:
+        /\/(user|account|order|invoice|profile|document|file|record|item|transaction|trade|portfolio|wallet)\/(\d+)/gi,
+      type: "path",
+    },
     { regex: /[?&](\w+_id)=(\d+)/gi, type: "query" },
   ];
 
@@ -175,18 +210,20 @@ async function testIDOROnEndpoint(url, sessionA, sessionB) {
 
   if (originalResponse.status !== 200) return findings;
 
-  const originalBody = typeof originalResponse.data === "string"
-    ? originalResponse.data
-    : JSON.stringify(originalResponse.data);
+  const originalBody =
+    typeof originalResponse.data === "string"
+      ? originalResponse.data
+      : JSON.stringify(originalResponse.data);
 
   // Now try with Session B (attacker) — same URL
   try {
     const attackResponse = await sessionB.instance.get(url);
 
     if (attackResponse.status === 200) {
-      const attackBody = typeof attackResponse.data === "string"
-        ? attackResponse.data
-        : JSON.stringify(attackResponse.data);
+      const attackBody =
+        typeof attackResponse.data === "string"
+          ? attackResponse.data
+          : JSON.stringify(attackResponse.data);
 
       // Check if B got meaningful data that looks like A's data
       const isUnauthorized =
@@ -198,7 +235,8 @@ async function testIDOROnEndpoint(url, sessionA, sessionB) {
 
       if (!isUnauthorized && attackBody.length > 100) {
         // Check if response contains user-specific data from A
-        const containsUserData = originalBody.length > 50 &&
+        const containsUserData =
+          originalBody.length > 50 &&
           attackBody.length > 50 &&
           attackBody !== "<html>" &&
           !attackBody.includes("login") &&
@@ -214,7 +252,8 @@ async function testIDOROnEndpoint(url, sessionA, sessionB) {
             method: "GET",
             detail: `Account B (${sessionB.username}) can access data belonging to Account A (${sessionA.username}). This endpoint does not properly verify ownership before returning data.`,
             evidence: `GET ${url} — Account B received HTTP 200 with ${attackBody.length} bytes of data`,
-            remediation: "Implement object-level authorization. Always verify the requesting user owns the resource before returning it.",
+            remediation:
+              "Implement object-level authorization. Always verify the requesting user owns the resource before returning it.",
             accountA: sessionA.username,
             accountB: sessionB.username,
           });
@@ -228,18 +267,26 @@ async function testIDOROnEndpoint(url, sessionA, sessionB) {
     const testIds = [
       parseInt(id.value) - 1,
       parseInt(id.value) + 1,
-      1, 2, 3, 100, 999,
+      1,
+      2,
+      3,
+      100,
+      999,
     ].filter((v) => v > 0 && v.toString() !== id.value);
 
     for (const testId of testIds.slice(0, 3)) {
       try {
-        const mutatedUrl = url.replace(id.fullMatch, id.fullMatch.replace(id.value, testId.toString()));
+        const mutatedUrl = url.replace(
+          id.fullMatch,
+          id.fullMatch.replace(id.value, testId.toString()),
+        );
         const response = await sessionB.instance.get(mutatedUrl);
 
         if (response.status === 200) {
-          const body = typeof response.data === "string"
-            ? response.data
-            : JSON.stringify(response.data);
+          const body =
+            typeof response.data === "string"
+              ? response.data
+              : JSON.stringify(response.data);
 
           const isBlocked =
             body.toLowerCase().includes("unauthorized") ||
@@ -259,7 +306,8 @@ async function testIDOROnEndpoint(url, sessionA, sessionB) {
               testedId: testId.toString(),
               detail: `Changing ${id.param} from ${id.value} to ${testId} returns data. Attacker can enumerate and access other users' resources.`,
               evidence: `GET ${mutatedUrl} → HTTP 200 (${body.length} bytes)`,
-              remediation: "Validate that the authenticated user owns the requested resource ID before returning data.",
+              remediation:
+                "Validate that the authenticated user owns the requested resource ID before returning data.",
             });
             break;
           }
@@ -275,20 +323,41 @@ async function testIDOROnEndpoint(url, sessionA, sessionB) {
 async function discoverAPIEndpoints(baseUrl, session) {
   const endpoints = [];
   const commonAPIPaths = [
-    "/api/user", "/api/me", "/api/profile", "/api/account",
-    "/api/orders", "/api/transactions", "/api/portfolio",
-    "/api/wallet", "/api/balance", "/api/history",
-    "/api/v1/user", "/api/v1/account", "/api/v1/orders",
-    "/api/v2/user", "/api/v2/account", "/api/v2/orders",
-    "/user/profile", "/account/details", "/dashboard/data",
+    "/api/user",
+    "/api/me",
+    "/api/profile",
+    "/api/account",
+    "/api/orders",
+    "/api/transactions",
+    "/api/portfolio",
+    "/api/wallet",
+    "/api/balance",
+    "/api/history",
+    "/api/v1/user",
+    "/api/v1/account",
+    "/api/v1/orders",
+    "/api/v2/user",
+    "/api/v2/account",
+    "/api/v2/orders",
+    "/user/profile",
+    "/account/details",
+    "/dashboard/data",
   ];
 
   for (const path of commonAPIPaths) {
     try {
       const url = new URL(path, baseUrl).href;
       const response = await session.instance.get(url);
-      if (response.status === 200 && response.data && typeof response.data === "object") {
-        endpoints.push({ url, status: response.status, dataSize: JSON.stringify(response.data).length });
+      if (
+        response.status === 200 &&
+        response.data &&
+        typeof response.data === "object"
+      ) {
+        endpoints.push({
+          url,
+          status: response.status,
+          dataSize: JSON.stringify(response.data).length,
+        });
       }
     } catch (e) {}
   }
@@ -330,7 +399,11 @@ async function runIDORScan(config) {
     results.sessionA = { username: user1, authenticated: true };
     console.log(`Session A created for ${user1}`);
   } catch (e) {
-    results.sessionA = { username: user1, authenticated: false, error: e.message };
+    results.sessionA = {
+      username: user1,
+      authenticated: false,
+      error: e.message,
+    };
     throw new Error(`Account A login failed: ${e.message}`);
   }
 
@@ -343,7 +416,11 @@ async function runIDORScan(config) {
     results.sessionB = { username: user2, authenticated: true };
     console.log(`Session B created for ${user2}`);
   } catch (e) {
-    results.sessionB = { username: user2, authenticated: false, error: e.message };
+    results.sessionB = {
+      username: user2,
+      authenticated: false,
+      error: e.message,
+    };
     throw new Error(`Account B login failed: ${e.message}`);
   }
 

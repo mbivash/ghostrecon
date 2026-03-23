@@ -47,7 +47,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route
-          path="/idorscanners"
+          path="/idorscan"
           element={
             <ProtectedRoute>
               <Layout>
