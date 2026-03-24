@@ -4,9 +4,7 @@ const cheerio = require("cheerio");
 const { testBlindSSRF, testBlindXSS, testBlindSQLi } = require("./oobDetector");
 const {
   validateSensitiveFile,
-  validateSecret,
   validateOpenRedirect,
-  validateXSSReflection,
   addConfidenceToFindings,
   filterFalsePositives,
 } = require("./validator");
@@ -210,10 +208,10 @@ async function crawlPage(targetUrl, baseUrl, visited = new Set()) {
       }
     }
     return {
-      links,
-      forms,
+      links: links || [],
+      forms: forms || [],
       html: typeof response.data === "string" ? response.data : "",
-      headers: response.headers,
+      headers: response.headers || {},
     };
   } catch (e) {
     return { links: [], forms: [], html: "", headers: {} };
@@ -534,6 +532,7 @@ function checkDOMXSS(html) {
 
 // ── CSRF Detection ────────────────────────────────────
 function checkCSRF(forms) {
+  if (!Array.isArray(forms)) return [];
   const findings = [];
   forms
     .filter((f) => f.method === "post")
@@ -547,12 +546,11 @@ function checkCSRF(forms) {
           type: "CSRF Token Missing",
           severity: "High",
           owasp: "A01:2021 - Broken Access Control",
-          detail: `POST form at "${form.action}" has no CSRF token. Attackers can trick users into submitting this form.`,
+          detail: `POST form at "${form.action}" has no CSRF token.`,
           evidence: `POST ${form.action} — fields: ${form.inputs.map((i) => i.name).join(", ")}`,
           endpoint: form.action,
           method: "POST",
-          remediation:
-            "Add CSRF token to every POST form. Use framework CSRF protection.",
+          remediation: "Add CSRF token to every POST form.",
         });
       }
     });
@@ -561,6 +559,7 @@ function checkCSRF(forms) {
 
 // ── SSRF ──────────────────────────────────────────────
 async function testSSRF(targetUrl, forms) {
+  if (!Array.isArray(forms)) return [];
   const findings = [];
   const ssrfPayloads = [
     "http://169.254.169.254/latest/meta-data/",
@@ -634,6 +633,7 @@ async function testSSRF(targetUrl, forms) {
 
 // ── Directory Traversal / LFI ─────────────────────────
 async function testDirectoryTraversal(forms) {
+  if (!Array.isArray(forms)) return [];
   const findings = [];
   const payloads = [
     "../../../etc/passwd",
@@ -705,6 +705,7 @@ async function testDirectoryTraversal(forms) {
 
 // ── Broken Auth ───────────────────────────────────────
 async function checkBrokenAuth(forms) {
+  if (!Array.isArray(forms)) return [];
   const findings = [];
   const loginForms = forms.filter((form) => {
     const fields = form.inputs.map((i) => i.name.toLowerCase()).join(" ");
@@ -756,7 +757,7 @@ async function checkBrokenAuth(forms) {
             owasp: "A07:2021 - Identification and Authentication Failures",
             endpoint: form.action,
             method: "POST",
-            detail: `Login succeeded with "${cred.user}/${cred.pass}". Direct access to application.`,
+            detail: `Login succeeded with "${cred.user}/${cred.pass}".`,
             evidence: `POST ${form.action} with ${cred.user}/${cred.pass} → HTTP ${response.status}`,
             remediation:
               "Change default passwords. Enforce strong password policy. Enable MFA.",
@@ -910,7 +911,12 @@ async function checkSensitiveFiles(baseUrl) {
       name: "WordPress config exposed",
       critical: true,
     },
-    { path: "/config.php", name: "PHP config exposed", critical: true },
+    {
+      path: "/config.php",
+      name: "PHP config exposed",
+      critical: true,
+      validate: true,
+    },
     { path: "/phpinfo.php", name: "PHP info exposed", critical: true },
     { path: "/admin", name: "Admin panel exposed", critical: false },
     { path: "/administrator", name: "Admin panel exposed", critical: false },
@@ -940,20 +946,15 @@ async function checkSensitiveFiles(baseUrl) {
       critical: false,
     },
   ];
-
   for (const file of files) {
     try {
       const fileUrl = new URL(file.path, baseUrl).href;
       const res = await axiosInstance.get(fileUrl);
-
       if (res.status !== 200) continue;
-
-      // Content-type check — if HTML, it's a fake/WAF intercept page
       const contentType = (res.headers["content-type"] || "").toLowerCase();
       if (contentType.includes("text/html") && file.validate) {
-        // Don't flag as critical — validate the actual content
         const validation = await validateSensitiveFile(fileUrl, file.path);
-        if (!validation.valid) continue; // False positive — skip
+        if (!validation.valid) continue;
         findings.push({
           type: file.name,
           severity: "Critical",
@@ -965,11 +966,9 @@ async function checkSensitiveFiles(baseUrl) {
         });
         continue;
       }
-
-      // For files requiring validation, run the validator
       if (file.validate) {
         const validation = await validateSensitiveFile(fileUrl, file.path);
-        if (!validation.valid) continue; // False positive — skip
+        if (!validation.valid) continue;
         findings.push({
           type: file.name,
           severity: "Critical",
@@ -1008,7 +1007,6 @@ async function checkOpenRedirect(targetUrl) {
     "dest",
   ];
   const targetDomain = new URL(targetUrl).hostname;
-
   for (const param of params) {
     try {
       const testUrl = new URL(targetUrl);
@@ -1019,8 +1017,7 @@ async function checkOpenRedirect(targetUrl) {
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers["location"] || "";
         const validation = validateOpenRedirect(location, targetDomain);
-        if (!validation.valid) continue; // Redirect stays on same domain — not a bug
-
+        if (!validation.valid) continue;
         findings.push({
           type: "Open Redirect",
           severity: "Medium",
@@ -1128,8 +1125,6 @@ async function testSQLi(form) {
   return findings;
 }
 
-// ── Blind SQLi ────────────────────────────────────────
-
 // ── IDOR Detection ────────────────────────────────────
 async function testIDOR(urls, authedInstance, baseUrl) {
   const findings = [];
@@ -1167,7 +1162,7 @@ async function testIDOR(urls, authedInstance, baseUrl) {
                 owasp: "A01:2021 - Broken Access Control",
                 endpoint: testUrl,
                 method: "GET",
-                detail: `IDOR detected. Changing ID from ${paramValue} to ${testId} returns data. Attacker can access other users data.`,
+                detail: `IDOR detected. Changing ID from ${paramValue} to ${testId} returns data.`,
                 evidence: `GET ${testUrl} returned HTTP 200 with content`,
                 remediation:
                   "Implement object-level authorization. Check user owns resource before returning it.",
@@ -1190,20 +1185,16 @@ async function authenticatedScan(targetUrl, credentials) {
     findings: [],
     authenticatedUrls: [],
   };
-
   let loginPageUrl = credentials.loginUrl || targetUrl;
   if (!loginPageUrl.startsWith("http")) loginPageUrl = "http://" + loginPageUrl;
-
   let loginPage;
   try {
     loginPage = await axiosInstance.get(loginPageUrl);
   } catch (e) {
     throw new Error("Could not reach login page: " + e.message);
   }
-
   const $ = cheerio.load(loginPage.data);
   let loginForm = null;
-
   $("form").each((i, form) => {
     const inputs = [];
     $(form)
@@ -1229,64 +1220,16 @@ async function authenticatedScan(targetUrl, credentials) {
       };
     }
   });
-
-  if (!loginForm) {
-    const loginPaths = [
-      "/login",
-      "/signin",
-      "/user/login",
-      "/account/login",
-      "/wp-login.php",
-    ];
-    for (const path of loginPaths) {
-      try {
-        const testUrl = new URL(path, new URL(loginPageUrl).origin).href;
-        const res = await axiosInstance.get(testUrl);
-        if (res.status === 200) {
-          const $login = cheerio.load(res.data);
-          $login("form").each((i, form) => {
-            const inputs = [];
-            $login(form)
-              .find("input")
-              .each((j, input) => {
-                inputs.push({
-                  name: $login(input).attr("name"),
-                  type: $login(input).attr("type") || "text",
-                  value: $login(input).attr("value") || "",
-                });
-              });
-            const hasPass = inputs.some(
-              (i) =>
-                i.type === "password" ||
-                (i.name && i.name.toLowerCase().includes("pass")),
-            );
-            if (hasPass && !loginForm) {
-              loginForm = {
-                action: new URL($login(form).attr("action") || testUrl, testUrl)
-                  .href,
-                method: ($login(form).attr("method") || "post").toLowerCase(),
-                inputs,
-              };
-              loginPageUrl = testUrl;
-            }
-          });
-          if (loginForm) break;
-        }
-      } catch (e) {}
-    }
-  }
-
   if (!loginForm) {
     results.findings.push({
       type: "Login Form Not Found",
       severity: "Info",
-      detail: "Could not find a login form. Try providing the exact login URL.",
+      detail: "Could not find a login form.",
       evidence: `Searched ${loginPageUrl}`,
       remediation: "Provide the exact URL of the login page.",
     });
     return results;
   }
-
   const formData = {};
   loginForm.inputs.forEach((input) => {
     if (!input.name) return;
@@ -1307,7 +1250,6 @@ async function authenticatedScan(targetUrl, credentials) {
       formData[input.name] = input.value;
     }
   });
-
   let loginResponse;
   try {
     loginResponse = await axiosInstance.post(loginForm.action, formData, {
@@ -1317,7 +1259,6 @@ async function authenticatedScan(targetUrl, credentials) {
   } catch (e) {
     throw new Error("Login request failed: " + e.message);
   }
-
   const loginBody =
     typeof loginResponse.data === "string"
       ? loginResponse.data.toLowerCase()
@@ -1334,7 +1275,6 @@ async function authenticatedScan(targetUrl, credentials) {
     loginBody.includes("welcome") ||
     loginBody.includes("logout") ||
     loginCookies.length > 0;
-
   if (loginFailed && !loginSucceeded) {
     results.findings.push({
       type: "Authentication Failed",
@@ -1345,10 +1285,7 @@ async function authenticatedScan(targetUrl, credentials) {
     });
     return results;
   }
-
   results.loginSuccessful = true;
-  console.log("Login successful!");
-
   const cookieHeader = loginCookies.join("; ");
   const authedInstance = axios.create({
     timeout: 15000,
@@ -1359,12 +1296,10 @@ async function authenticatedScan(targetUrl, credentials) {
     },
     maxRedirects: 3,
   });
-
   const baseUrl = new URL(targetUrl).origin;
   const visited = new Set();
   const queue = [targetUrl];
   const allForms = [];
-
   while (queue.length > 0 && visited.size < 15) {
     const pageUrl = queue.shift();
     if (visited.has(pageUrl)) continue;
@@ -1374,7 +1309,6 @@ async function authenticatedScan(targetUrl, credentials) {
       const $page = cheerio.load(response.data);
       results.pagesScanned++;
       results.authenticatedUrls.push(pageUrl);
-
       $page("form").each((i, form) => {
         const action = $page(form).attr("action") || pageUrl;
         const method = ($page(form).attr("method") || "get").toLowerCase();
@@ -1403,7 +1337,6 @@ async function authenticatedScan(targetUrl, credentials) {
           } catch (e) {}
         }
       });
-
       $page("a[href]").each((i, el) => {
         const href = $page(el).attr("href");
         if (!href) return;
@@ -1415,11 +1348,6 @@ async function authenticatedScan(targetUrl, credentials) {
       });
     } catch (e) {}
   }
-
-  console.log(
-    `Crawled ${results.pagesScanned} authenticated pages, found ${allForms.length} forms`,
-  );
-
   for (const form of allForms.slice(0, 10)) {
     for (const payload of XSS_PAYLOADS.slice(0, 5)) {
       try {
@@ -1438,17 +1366,14 @@ async function authenticatedScan(targetUrl, credentials) {
             endpoint: form.action,
             method: "POST",
             payload,
-            detail:
-              "XSS found in authenticated page. Can lead to session hijacking of logged-in users.",
+            detail: "XSS found in authenticated page.",
             evidence: `Payload "${payload}" reflected in authenticated response`,
-            remediation:
-              "Encode all output. Use CSP. Use framework auto-escaping.",
+            remediation: "Encode all output. Use CSP.",
           });
           break;
         }
       } catch (e) {}
     }
-
     for (const payload of SQLI_PAYLOADS.slice(0, 5)) {
       try {
         const fd = {};
@@ -1469,8 +1394,7 @@ async function authenticatedScan(targetUrl, credentials) {
             endpoint: form.action,
             method: "POST",
             payload,
-            detail:
-              "SQL injection found in authenticated area. Full database access possible.",
+            detail: "SQL injection found in authenticated area.",
             evidence: `SQL error "${err}" in authenticated endpoint`,
             remediation: "Use parameterized queries everywhere.",
           });
@@ -1479,14 +1403,12 @@ async function authenticatedScan(targetUrl, credentials) {
       } catch (e) {}
     }
   }
-
   const idorFindings = await testIDOR(
     results.authenticatedUrls,
     authedInstance,
     baseUrl,
   );
   results.findings.push(...idorFindings);
-
   return results;
 }
 
@@ -1501,11 +1423,9 @@ async function deepScan(targetUrl) {
     cms: [],
     startTime: new Date().toISOString(),
   };
-
   try {
     if (!targetUrl.startsWith("http")) targetUrl = "http://" + targetUrl;
     const baseUrl = new URL(targetUrl).origin;
-
     console.log("Fetching:", targetUrl);
     let mainResponse;
     try {
@@ -1513,11 +1433,9 @@ async function deepScan(targetUrl) {
     } catch (e) {
       throw new Error(`Could not reach target: ${e.message}`);
     }
-
     results.pagesScanned++;
     const headers = mainResponse.headers;
     const html = typeof mainResponse.data === "string" ? mainResponse.data : "";
-
     console.log("Running parallel checks...");
     const [
       headerF,
@@ -1540,7 +1458,6 @@ async function deepScan(targetUrl) {
       testXXE(targetUrl),
       checkCORS(targetUrl),
     ]);
-
     results.findings.push(
       ...headerF,
       ...cookieF,
@@ -1556,33 +1473,30 @@ async function deepScan(targetUrl) {
     results.waf = wafR.detectedWAFs;
     results.cms = cmsR.detectedCMS;
 
+    // ── FIXED: Safe crawl with array checks ──────────
     console.log("Crawling pages...");
     const visited = new Set();
-    const { links, forms: mainForms } = await crawlPage(
-      targetUrl,
-      baseUrl,
-      visited,
-    );
+    const crawlResult = await crawlPage(targetUrl, baseUrl, visited);
+    const mainForms = Array.isArray(crawlResult.forms) ? crawlResult.forms : [];
+    const mainLinks = Array.isArray(crawlResult.links) ? crawlResult.links : [];
     const allForms = [...mainForms];
 
-    for (const link of links.slice(0, 5)) {
-      const { forms } = await crawlPage(link, baseUrl, visited);
-      allForms.push(...forms);
+    for (const link of mainLinks.slice(0, 5)) {
+      const subResult = await crawlPage(link, baseUrl, visited);
+      const subForms = Array.isArray(subResult.forms) ? subResult.forms : [];
+      allForms.push(...subForms);
       results.pagesScanned++;
     }
 
     results.formsFound = allForms.length;
     results.findings.push(...checkCSRF(allForms));
-
     const [authF, jwtF, ssrfF, traversalF] = await Promise.all([
       checkBrokenAuth(allForms),
       checkJWT(headers),
       testSSRF(targetUrl, allForms),
       testDirectoryTraversal(allForms),
     ]);
-
     results.findings.push(...authF, ...jwtF, ...ssrfF, ...traversalF);
-
     console.log(
       `Testing ${Math.min(allForms.length, 10)} forms with advanced payloads...`,
     );
@@ -1604,8 +1518,6 @@ async function deepScan(targetUrl) {
         ...ssti,
       );
     }
-
-    // Advanced checks
     console.log("Running advanced security checks...");
     const [protoFindings, secretResult, techResult, smugglingFindings] =
       await Promise.all([
@@ -1614,7 +1526,6 @@ async function deepScan(targetUrl) {
         fingerprintTechnologies(targetUrl, html, headers),
         testRequestSmuggling(targetUrl),
       ]);
-    // Out-of-band blind detection
     console.log("Running out-of-band blind detection...");
     const [blindSSRF, blindXSS, blindSQLi] = await Promise.all([
       testBlindSSRF(targetUrl, allForms, axiosInstance),
@@ -1622,52 +1533,43 @@ async function deepScan(targetUrl) {
       testBlindSQLi(allForms, axiosInstance),
     ]);
     results.findings.push(...blindSSRF, ...blindXSS, ...blindSQLi);
-
     results.findings.push(
       ...protoFindings,
       ...secretResult.findings,
       ...techResult.findings,
       ...smugglingFindings,
     );
-
     results.secretsFound = secretResult.secretsFound;
     results.technologies = techResult.detected;
-
-    // Stored XSS test
     console.log("Testing for stored XSS...");
     const storedXssFindings = await testStoredXSS(targetUrl, allForms, baseUrl);
     results.findings.push(...storedXssFindings);
 
+    // ── FIXED: Dedup, false positive filter, confidence scoring ──
     const seen = new Set();
     results.findings = results.findings.filter((f) => {
       const key = `${f.type}-${f.endpoint || ""}-${f.parameter || ""}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
+    });
 
-      // Filter known false positives (security.txt, bare WAF detected, etc.)
-      results.findings = filterFalsePositives(results.findings);
+    // Filter false positives
+    results.findings = filterFalsePositives(results.findings);
 
-      // Add confidence score to every finding
-      results.findings = addConfidenceToFindings(results.findings);
+    // Add confidence scores
+    results.findings = addConfidenceToFindings(results.findings);
 
-      // Sort: Confirmed first, then Probable, then Possible; within each by severity
-      const confidenceOrder = { Confirmed: 0, Probable: 1, Possible: 2 };
-      const severityOrder = {
-        Critical: 0,
-        High: 1,
-        Medium: 2,
-        Low: 3,
-        Info: 4,
-      };
-      results.findings.sort((a, b) => {
-        const cA = confidenceOrder[a.confidence] ?? 3;
-        const cB = confidenceOrder[b.confidence] ?? 3;
-        if (cA !== cB) return cA - cB;
-        return (
-          (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5)
-        );
-      });
+    // Sort by confidence then severity
+    const confidenceOrder = { Confirmed: 0, Probable: 1, Possible: 2 };
+    const severityOrder = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
+    results.findings.sort((a, b) => {
+      const cA = confidenceOrder[a.confidence] ?? 3;
+      const cB = confidenceOrder[b.confidence] ?? 3;
+      if (cA !== cB) return cA - cB;
+      return (
+        (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5)
+      );
     });
 
     results.summary = {
@@ -1679,7 +1581,6 @@ async function deepScan(targetUrl) {
       info: results.findings.filter((f) => f.severity === "Info").length,
       total: results.findings.length,
     };
-
     results.riskScore = Math.min(
       100,
       results.summary.critical * 30 +
@@ -1687,7 +1588,6 @@ async function deepScan(targetUrl) {
         results.summary.medium * 8 +
         results.summary.low * 3,
     );
-
     results.endTime = new Date().toISOString();
     console.log(`Scan complete. ${results.findings.length} findings.`);
     return results;
@@ -1695,10 +1595,11 @@ async function deepScan(targetUrl) {
     throw err;
   }
 }
+
 // ── Stored XSS Detection ──────────────────────────────
 async function testStoredXSS(targetUrl, forms, baseUrl) {
+  if (!Array.isArray(forms)) return [];
   const findings = [];
-
   const storedPayloads = [
     {
       payload: '<script>alert("ghostrecon-xss-test")</script>',
@@ -1715,18 +1616,13 @@ async function testStoredXSS(targetUrl, forms, baseUrl) {
     { payload: "javascript:alert('gr-xss')", marker: "gr-xss" },
     { payload: "<svg onload=\"alert('gr-svg-xss')\">", marker: "gr-svg-xss" },
   ];
-
-  // Pages to check after submitting
   const checkPages = new Set([targetUrl]);
-
-  // Submit payloads to all POST forms
   for (const form of forms.filter((f) => f.method === "post").slice(0, 8)) {
     for (const { payload, marker } of storedPayloads.slice(0, 3)) {
       try {
         const formData = {};
         form.inputs.forEach((input) => {
           const name = input.name.toLowerCase();
-          // Skip obvious non-text fields
           if (name.includes("email")) {
             formData[input.name] = `test${Date.now()}@ghostrecon-test.com`;
           } else if (name.includes("phone") || name.includes("tel")) {
@@ -1743,30 +1639,21 @@ async function testStoredXSS(targetUrl, forms, baseUrl) {
             formData[input.name] = payload;
           }
         });
-
         const submitResponse = await axiosInstance.post(form.action, formData);
-
-        // Track where we might find the stored payload
         if (submitResponse.status === 200 || submitResponse.status === 302) {
           checkPages.add(form.action);
           checkPages.add(form.pageUrl || targetUrl);
-
-          // If redirect, follow it
           if (
             submitResponse.status === 302 &&
             submitResponse.headers["location"]
           ) {
             try {
-              const redirectUrl = new URL(
-                submitResponse.headers["location"],
-                baseUrl,
-              ).href;
-              checkPages.add(redirectUrl);
+              checkPages.add(
+                new URL(submitResponse.headers["location"], baseUrl).href,
+              );
             } catch (e) {}
           }
         }
-
-        // Check response immediately for reflected+stored combo
         const immediateBody =
           typeof submitResponse.data === "string"
             ? submitResponse.data
@@ -1780,19 +1667,15 @@ async function testStoredXSS(targetUrl, forms, baseUrl) {
             endpoint: form.action,
             method: "POST",
             payload,
-            detail: `XSS payload submitted via POST form and immediately reflected in response. The payload may be stored and displayed to other users.`,
+            detail:
+              "XSS payload submitted via POST form and immediately reflected in response.",
             evidence: `Marker "${marker}" found in POST response from ${form.action}`,
-            remediation:
-              "Encode all user input before storing and displaying. Use parameterized queries. Implement output encoding.",
+            remediation: "Encode all user input before storing and displaying.",
           });
         }
       } catch (e) {}
     }
   }
-
-  // Now check all pages for stored payloads
-  console.log(`Checking ${checkPages.size} pages for stored XSS...`);
-
   for (const pageUrl of checkPages) {
     try {
       const response = await axiosInstance.get(pageUrl);
@@ -1800,7 +1683,6 @@ async function testStoredXSS(targetUrl, forms, baseUrl) {
         typeof response.data === "string"
           ? response.data
           : JSON.stringify(response.data);
-
       for (const { payload, marker } of storedPayloads) {
         if (
           body.includes(marker) &&
@@ -1814,18 +1696,16 @@ async function testStoredXSS(targetUrl, forms, baseUrl) {
             endpoint: pageUrl,
             method: "GET",
             payload,
-            detail: `Stored XSS confirmed. The XSS payload was submitted and is now persisted in the page at ${pageUrl}. Every user who visits this page will execute the malicious script. This can lead to mass session hijacking, credential theft, and account takeovers.`,
+            detail: `Stored XSS confirmed at ${pageUrl}.`,
             evidence: `Marker "${marker}" found stored and unencoded at ${pageUrl}`,
             remediation:
-              "Immediately sanitize all stored data. Implement output encoding (HTML entity encoding) for all user-generated content. Use a Content Security Policy. Consider using DOMPurify for client-side sanitization.",
+              "Immediately sanitize all stored data. Implement output encoding.",
           });
           break;
         }
       }
     } catch (e) {}
   }
-
-  // Also check GET forms — some search results pages store and reflect
   for (const form of forms.filter((f) => f.method === "get").slice(0, 5)) {
     for (const { payload, marker } of storedPayloads.slice(0, 2)) {
       try {
@@ -1838,8 +1718,6 @@ async function testStoredXSS(targetUrl, forms, baseUrl) {
           typeof response.data === "string"
             ? response.data
             : JSON.stringify(response.data);
-
-        // Check if this page links to other pages that might show the stored content
         if (body.includes(marker) && !body.includes("&lt;")) {
           findings.push({
             type: "XSS in Search/Filter Results",
@@ -1849,17 +1727,14 @@ async function testStoredXSS(targetUrl, forms, baseUrl) {
             endpoint: testUrl.href,
             method: "GET",
             payload,
-            detail: `XSS payload reflected in search or filter results. If search terms are stored (search history, logs), this becomes stored XSS.`,
+            detail: "XSS payload reflected in search or filter results.",
             evidence: `Marker "${marker}" found unencoded in search results at ${testUrl.href}`,
-            remediation:
-              "Encode all output including search terms. Never reflect user input without sanitization.",
+            remediation: "Encode all output including search terms.",
           });
         }
       } catch (e) {}
     }
   }
-
-  // Remove duplicates
   const seen = new Set();
   return findings.filter((f) => {
     const key = `${f.type}-${f.endpoint}-${f.payload}`;
