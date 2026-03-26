@@ -3,24 +3,37 @@ const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 
+const { getAllowedOrigins, requireEnv } = require("./config");
+
+const JWT_SECRET = requireEnv("JWT_SECRET");
 const app = express();
-app.use(cors());
-app.use(express.json());
+const allowedOrigins = getAllowedOrigins();
 
-// ── Rate Limiters ─────────────────────────────────────
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
 
-// General API limit — 100 requests per 15 minutes
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true); // server-to-server
+      if (allowedOrigins.length === 0) return callback(null, true); // dev fallback
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("CORS policy blocked this origin."));
+    },
+    credentials: true,
+  }),
+);
+
+app.use(express.json({ limit: "1mb" }));
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: {
-    error: "Too many requests. Please wait 15 minutes and try again.",
-  },
+  max: 120,
+  message: { error: "Too many requests. Please wait and try again." },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Scan limit — 10 scans per 15 minutes (prevents abuse)
 const scanLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -29,7 +42,6 @@ const scanLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Auth limit — 10 login attempts per hour
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
@@ -38,13 +50,9 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Apply general limiter to all routes
 app.use("/api/", generalLimiter);
-
-// Auth routes — stricter limit
 app.use("/api/auth", authLimiter, require("./routes/auth"));
 
-// Protected routes with scan limiter on scan endpoints
 const auth = require("./middleware/auth");
 app.use("/api/network", auth, scanLimiter, require("./routes/network"));
 app.use("/api/webvuln", auth, scanLimiter, require("./routes/webvuln"));
@@ -71,10 +79,30 @@ app.use("/api/oauth", auth, require("./routes/oauth"));
 app.use("/api/idorscan", auth, scanLimiter, require("./routes/idorscan"));
 
 app.get("/api/health", (req, res) => {
-  res.json({ status: "GhostRecon server running" });
+  res.json({
+    status: "ok",
+    service: "GhostRecon API",
+    jwtConfigured: Boolean(JWT_SECRET),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.use((err, req, res, next) => {
+  if (err.message === "CORS policy blocked this origin.") {
+    return res.status(403).json({ error: err.message });
+  }
+  return next(err);
+});
+
+app.use((err, req, res, next) => {
+  console.error("[UnhandledError]", err);
+  return res.status(500).json({ error: "Internal server error." });
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`GhostRecon server running on port ${PORT}`);
+  console.log(
+    `Allowed CORS origins: ${allowedOrigins.length > 0 ? allowedOrigins.join(", ") : "* (not restricted)"}`,
+  );
 });
