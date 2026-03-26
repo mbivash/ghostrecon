@@ -12,15 +12,18 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  const resetMessages = () => {
+    setError("");
+    setSuccess("");
+  };
+
   const handleLogin = async () => {
     if (!email || !password) return setError("Please fill in all fields.");
     setLoading(true);
-    setError("");
+    resetMessages();
+
     try {
-      const res = await api.post("/api/auth/login", {
-        email,
-        password,
-      });
+      const res = await api.post("/api/auth/login", { email, password });
       localStorage.setItem("gr_token", res.data.token);
       localStorage.setItem("gr_user", JSON.stringify(res.data.user));
       navigate("/");
@@ -35,20 +38,24 @@ export default function Login() {
     if (!name || !email || !password)
       return setError("Please fill in all fields.");
     setLoading(true);
-    setError("");
+    resetMessages();
+
     try {
-      await api.post("/api/auth/register", {
-        name,
-        email,
-        password,
-      });
-      setSuccess("Account created! You can now log in.");
+      await api.post("/api/auth/register", { name, email, password });
+      setSuccess("Account created! You can now sign in.");
       setMode("login");
       setName("");
+      setPassword("");
     } catch (err) {
       setError(err.response?.data?.error || "Registration failed.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onEnter = (e) => {
+    if (e.key === "Enter") {
+      mode === "login" ? handleLogin() : handleRegister();
     }
   };
 
@@ -72,7 +79,6 @@ export default function Login() {
           maxWidth: "380px",
         }}
       >
-        {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: "32px" }}>
           <div
             style={{
@@ -136,7 +142,6 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Mode toggle */}
         <div
           style={{
             display: "flex",
@@ -152,8 +157,7 @@ export default function Login() {
               key={m}
               onClick={() => {
                 setMode(m);
-                setError("");
-                setSuccess("");
+                resetMessages();
               }}
               style={{
                 flex: 1,
@@ -172,13 +176,13 @@ export default function Login() {
           ))}
         </div>
 
-        {/* Form */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           {mode === "register" && (
             <input
               placeholder="Full name"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              onKeyDown={onEnter}
             />
           )}
 
@@ -187,6 +191,7 @@ export default function Login() {
             placeholder="Email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={onEnter}
           />
 
           <input
@@ -194,11 +199,14 @@ export default function Login() {
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) =>
-              e.key === "Enter" &&
-              (mode === "login" ? handleLogin() : handleRegister())
-            }
+            onKeyDown={onEnter}
           />
+
+          {mode === "register" && (
+            <div style={{ fontSize: "12px", color: "#555" }}>
+              Use 10+ characters with uppercase, lowercase, and a number.
+            </div>
+          )}
 
           {error && (
             <div
@@ -243,20 +251,6 @@ export default function Login() {
                 : "Create account"}
           </button>
         </div>
-
-        {/* Default credentials hint */}
-        {mode === "login" && (
-          <div
-            style={{
-              textAlign: "center",
-              marginTop: "20px",
-              fontSize: "12px",
-              color: "#333",
-            }}
-          >
-            Default: ghost@recon.io / ghostrecon123
-          </div>
-        )}
       </div>
     </div>
   );
